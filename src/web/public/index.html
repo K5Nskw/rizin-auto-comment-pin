@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自動コメント / ピン留め 管理画面</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23e11d2e'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<header>
+  <h1>自動コメント &amp; ピン留め</h1>
+  <div class="header-right">
+    <span id="dry-run-badge" class="badge badge-warn" hidden>DRY_RUN</span>
+    <button id="btn-poll" class="btn btn-ghost">今すぐ新着チェック</button>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button class="tab active" data-tab="dashboard">ダッシュボード</button>
+  <button class="tab" data-tab="templates">コメント文の編集</button>
+  <button class="tab" data-tab="jobs">投稿履歴</button>
+  <button class="tab" data-tab="setup">アカウント連携</button>
+  <button class="tab" data-tab="logs">ログ</button>
+</nav>
+
+<main>
+  <!-- ------------------------------ dashboard ------------------------------ -->
+  <section id="tab-dashboard" class="tab-panel active">
+    <div id="warnings"></div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>YouTube</h3>
+        <div id="yt-status" class="status">読み込み中…</div>
+      </div>
+      <div class="card">
+        <h3>TikTok</h3>
+        <div id="tt-status" class="status">読み込み中…</div>
+      </div>
+      <div class="card">
+        <h3>ブラウザ自動操作（ピン留め）</h3>
+        <div id="browser-status" class="status">読み込み中…</div>
+      </div>
+      <div class="card">
+        <h3>ジョブ状況</h3>
+        <div id="job-stats" class="status">読み込み中…</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>動作設定（環境変数）</h3>
+      <div id="runtime-config" class="kv"></div>
+    </div>
+  </section>
+
+  <!-- ------------------------------ templates ------------------------------ -->
+  <section id="tab-templates" class="tab-panel">
+    <div class="split">
+      <div class="split-left">
+        <div class="row-between">
+          <h3>テンプレート一覧</h3>
+          <button id="btn-new-template" class="btn btn-primary">＋ 新規</button>
+        </div>
+        <p class="hint">
+          上にあるものほど優先されます。動画のタイトルが条件に一致した最初のテンプレートが使われます。
+        </p>
+        <ul id="template-list" class="template-list"></ul>
+      </div>
+
+      <div class="split-right">
+        <form id="template-form" class="card" hidden>
+          <div class="row-between">
+            <h3 id="form-title">テンプレートを編集</h3>
+            <button type="button" id="btn-close-form" class="btn btn-ghost">閉じる</button>
+          </div>
+
+          <label>名前
+            <input name="name" type="text" required placeholder="例: 試合ハイライト用">
+          </label>
+
+          <div class="row">
+            <label>対象プラットフォーム
+              <select name="platform">
+                <option value="all">両方</option>
+                <option value="youtube">YouTube のみ</option>
+                <option value="tiktok">TikTok のみ</option>
+              </select>
+            </label>
+            <label>優先度（小さいほど優先）
+              <input name="priority" type="number" min="0" max="9999" value="100">
+            </label>
+          </div>
+
+          <div class="row">
+            <label>使う条件
+              <select name="matchType">
+                <option value="always">すべての動画</option>
+                <option value="keyword">キーワードを含むとき</option>
+                <option value="regex">正規表現に一致するとき</option>
+              </select>
+            </label>
+            <label id="match-value-wrap">条件の値
+              <input name="matchValue" type="text" placeholder="ハイライト, 記者会見（カンマ区切り）">
+            </label>
+          </div>
+
+          <div class="row">
+            <label class="checkbox">
+              <input name="enabled" type="checkbox" checked> 有効にする
+            </label>
+            <label class="checkbox">
+              <input name="pin" type="checkbox" checked> コメントをピン留めする
+            </label>
+            <label>投稿までの待ち時間（秒）
+              <input name="delaySeconds" type="number" min="0" max="86400" value="30">
+            </label>
+          </div>
+
+          <h4>コメント本文</h4>
+          <p class="hint">
+            複数登録すると、投稿のたびにランダムで1つが選ばれます（毎回同じ文面になるのを防げます）。
+          </p>
+          <div id="variable-chips" class="chips"></div>
+          <div id="bodies"></div>
+          <button type="button" id="btn-add-body" class="btn btn-ghost">＋ 文面のバリエーションを追加</button>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="button" id="btn-delete-template" class="btn btn-danger">削除</button>
+            <span id="form-message" class="form-message"></span>
+          </div>
+        </form>
+
+        <div class="card">
+          <h3>プレビュー</h3>
+          <p class="hint">この動画タイトルで投稿されたら、実際に何が書き込まれるかを確認できます。</p>
+          <label>テスト用の動画タイトル
+            <input id="preview-title" type="text" value="【RIZIN】試合ハイライト｜〇〇 vs 〇〇">
+          </label>
+          <label>プラットフォーム
+            <select id="preview-platform">
+              <option value="youtube">YouTube</option>
+              <option value="tiktok">TikTok</option>
+            </select>
+          </label>
+          <button id="btn-preview" class="btn btn-ghost">プレビュー</button>
+          <div id="preview-result"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------- jobs --------------------------------- -->
+  <section id="tab-jobs" class="tab-panel">
+    <div class="row-between">
+      <h3>投稿履歴</h3>
+      <button id="btn-refresh-jobs" class="btn btn-ghost">更新</button>
+    </div>
+    <div id="jobs-table"></div>
+  </section>
+
+  <!-- -------------------------------- setup -------------------------------- -->
+  <section id="tab-setup" class="tab-panel">
+    <div class="card">
+      <h3>1. アカウント連携（新着検知 / YouTubeコメント投稿）</h3>
+      <p class="hint">
+        YouTube は連携するだけで新着検知とコメント投稿ができます。TikTok は新着検知のみ API で行います。
+      </p>
+      <div class="row">
+        <a class="btn btn-primary" href="/oauth/youtube/start">YouTube を連携する</a>
+        <a class="btn btn-primary" href="/oauth/tiktok/start">TikTok を連携する</a>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn btn-ghost" data-disconnect="youtube">YouTube 連携を解除</button>
+        <button class="btn btn-ghost" data-disconnect="tiktok">TikTok 連携を解除</button>
+        <button id="btn-websub" class="btn btn-ghost">YouTube 即時通知を再購読</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>2. ログインセッションの登録（ピン留め / TikTokコメント用）</h3>
+      <div class="notice">
+        <strong>なぜ必要か：</strong>
+        YouTube・TikTok のどちらにも「コメントをピン留めする」公式APIがありません。
+        TikTok には自分の動画へコメントを投稿するAPIもありません。
+        そのため、この2つだけは<strong>自分のログイン済みブラウザと同じCookie</strong>を使って
+        画面を自動操作します。Cookie は暗号化して保存されます。
+      </div>
+      <p class="hint">
+        取得方法：PCのブラウザで対象アカウントにログイン → Cookie エクスポート拡張機能で JSON
+        形式でコピー → 下に貼り付け。詳細は <code>docs/BROWSER-SESSION.md</code> を参照。
+      </p>
+
+      <div class="session-block">
+        <h4>YouTube</h4>
+        <textarea id="cookies-youtube" rows="4" placeholder='[{"name":"SID","value":"...","domain":".youtube.com", ...}]'></textarea>
+        <div class="row">
+          <button class="btn btn-primary" data-save-session="youtube">保存</button>
+          <button class="btn btn-ghost" data-check-session="youtube">ログイン確認</button>
+          <button class="btn btn-ghost" data-clear-session="youtube">削除</button>
+          <button class="btn btn-ghost" data-screenshot="youtube">失敗時の画面を見る</button>
+        </div>
+        <div id="session-msg-youtube" class="form-message"></div>
+      </div>
+
+      <div class="session-block">
+        <h4>TikTok</h4>
+        <textarea id="cookies-tiktok" rows="4" placeholder='[{"name":"sessionid","value":"...","domain":".tiktok.com", ...}]'></textarea>
+        <div class="row">
+          <button class="btn btn-primary" data-save-session="tiktok">保存</button>
+          <button class="btn btn-ghost" data-check-session="tiktok">ログイン確認</button>
+          <button class="btn btn-ghost" data-clear-session="tiktok">削除</button>
+          <button class="btn btn-ghost" data-screenshot="tiktok">失敗時の画面を見る</button>
+        </div>
+        <div id="session-msg-tiktok" class="form-message"></div>
+      </div>
+
+      <div id="screenshot-view"></div>
+    </div>
+  </section>
+
+  <!-- --------------------------------- logs -------------------------------- -->
+  <section id="tab-logs" class="tab-panel">
+    <div class="row-between">
+      <h3>ログ</h3>
+      <button id="btn-refresh-logs" class="btn btn-ghost">更新</button>
+    </div>
+    <div id="logs-view"></div>
+  </section>
+</main>
+
+<script src="./app.js"></script>
+</body>
+</html>
