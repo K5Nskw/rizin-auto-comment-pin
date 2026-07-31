@@ -197,6 +197,17 @@
         <a class="btn btn-primary" href="/oauth/youtube/start">YouTube を連携する</a>
         <a class="btn btn-primary" href="/oauth/tiktok/start">TikTok を連携する</a>
       </div>
+
+      <div class="notice" style="margin-top:14px">
+        <strong>リダイレクトURI</strong>
+        <p class="hint" style="margin:6px 0">
+          アプリが実際に送信している値です。開発者コンソールに<strong>一字一句そのまま</strong>登録してください。
+          <code>redirect_uri</code> エラーはこの不一致が原因です。
+          <span style="color:var(--warn)">TikTok は Sandbox と Production で設定が別なので、
+          いま使っている Client Key と同じ環境に登録する必要があります。</span>
+        </p>
+        <div id="redirect-uris" class="kv"></div>
+      </div>
       <div class="row" style="margin-top:12px">
         <button class="btn btn-ghost" data-disconnect="youtube">YouTube 連携を解除</button>
         <button class="btn btn-ghost" data-disconnect="tiktok">TikTok 連携を解除</button>

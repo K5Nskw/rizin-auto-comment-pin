@@ -52,6 +52,23 @@ const STATUS_LABELS = {
 };
 
 function renderConsoleUrls(s) {
+  const copyRow = ([k, v]) =>
+    `<div>${esc(k)}</div><div><code>${esc(v)}</code>
+     <button class="btn btn-ghost btn-copy" data-copy="${esc(v)}">コピー</button></div>`;
+
+  // Duplicated next to the connect buttons: this is the value a redirect_uri
+  // error is about, and it needs to be where the error happens.
+  const redirectEl = $('#redirect-uris');
+  if (redirectEl) {
+    redirectEl.innerHTML = [
+      ['YouTube', s.redirectUris.youtube],
+      ['TikTok', s.redirectUris.tiktok],
+      ['TikTok Web/Desktop URL', s.publicUrl],
+    ]
+      .map(copyRow)
+      .join('');
+  }
+
   $('#console-urls').innerHTML = [
     ['プライバシーポリシー URL', s.legal.privacy],
     ['利用規約 URL', s.legal.terms],
@@ -59,14 +76,10 @@ function renderConsoleUrls(s) {
     ['TikTok リダイレクトURI', s.redirectUris.tiktok],
     ['TikTok Web/Desktop URL', s.publicUrl],
   ]
-    .map(
-      ([k, v]) =>
-        `<div>${esc(k)}</div><div><code>${esc(v)}</code>
-         <button class="btn btn-ghost btn-copy" data-copy="${esc(v)}">コピー</button></div>`,
-    )
+    .map(copyRow)
     .join('');
 
-  $$('#console-urls .btn-copy').forEach((b) =>
+  $$('.btn-copy').forEach((b) =>
     b.addEventListener('click', async () => {
       await navigator.clipboard.writeText(b.dataset.copy);
       const original = b.textContent;
