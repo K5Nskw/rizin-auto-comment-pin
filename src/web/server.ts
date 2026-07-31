@@ -4,6 +4,7 @@ import express from 'express';
 import { config } from '../config.js';
 import { createLogger } from '../logger.js';
 import { requireAdmin } from './auth.js';
+import { legalRouter } from './legal.js';
 import { apiRouter } from './routes/api.js';
 import { oauthRouter } from './routes/oauth.js';
 import { webhooksRouter } from './routes/webhooks.js';
@@ -22,6 +23,10 @@ export function createServer() {
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true, uptime: process.uptime() });
   });
+
+  // Public on purpose: platform reviewers must be able to open these without
+  // credentials, so they are mounted ahead of the admin auth middleware.
+  app.use(legalRouter);
 
   app.use(express.json({ limit: '6mb' }));
   app.use('/oauth', oauthRouter);

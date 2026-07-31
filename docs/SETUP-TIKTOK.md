@@ -53,6 +53,34 @@ https://<Railwayで発行したURL>/oauth/tiktok/callback
 
 例: `https://rizin-auto-comment-pin-production.up.railway.app/oauth/tiktok/callback`
 
+> リダイレクトURIの入力欄が出ない場合は、**Basic information → Platforms → Web** の
+> トグルがOFFです。先にONにして Web/Desktop URL（RailwayのベースURL）を入れてください。
+
+## 3-4b. プライバシーポリシー / 利用規約のURL
+
+TikTok の審査では、公開されたプライバシーポリシーURLの提出が必要です。
+**このアプリが自動で用意します。** 別途ページを作る必要はありません。
+
+Railway の Variables に運営者名と連絡先を設定してください:
+
+```
+LEGAL_ORG_NAME=RIZIN FIGHTING FEDERATION
+LEGAL_CONTACT_EMAIL=（問い合わせ用のメールアドレス）
+```
+
+すると以下のURLが公開されます（審査担当者が閲覧できる必要があるため、認証なしで開けます）:
+
+```
+https://<RailwayのURL>/privacy
+https://<RailwayのURL>/terms
+```
+
+管理画面のダッシュボード「各コンソールに登録するURL」からコピーできます。
+
+> 内容は本ツールの実際の挙動（自社アカウントのみ・第三者データ不取得・トークンは暗号化保存）
+> に合わせて記載しています。ただし法的文書ですので、対外提出の前に自社の法務確認を通すことを
+> おすすめします。文面は `src/web/legal.ts` で編集できます。
+
 ## 3-5. Railway に設定する
 
 アプリの **Client key** と **Client secret** を Railway の Variables に追加：

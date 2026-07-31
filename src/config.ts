@@ -32,6 +32,11 @@ const schema = z.object({
   TIKTOK_CLIENT_KEY: z.string().optional().default(''),
   TIKTOK_CLIENT_SECRET: z.string().optional().default(''),
 
+  // Shown on the public /privacy and /terms pages, which TikTok's app review
+  // requires a URL for.
+  LEGAL_ORG_NAME: z.string().optional().default(''),
+  LEGAL_CONTACT_EMAIL: z.string().optional().default(''),
+
   ENABLE_BROWSER_AUTOMATION: bool(true),
   POLL_INTERVAL_MINUTES: int(5),
   NOTIFY_WEBHOOK_URL: z.string().optional().default(''),
@@ -78,5 +83,12 @@ export function configWarnings(): string[] {
   if (!config.YOUTUBE_CLIENT_ID) w.push('YOUTUBE_CLIENT_ID が未設定です。YouTube 連携ができません。');
   if (!config.WEBSUB_SECRET) w.push('WEBSUB_SECRET が未設定です。YouTube の即時通知が無効になります（ポーリングのみ）。');
   if (!config.TIKTOK_CLIENT_KEY) w.push('TIKTOK_CLIENT_KEY が未設定です。TikTok の新着検知ができません。');
+  if (!config.LEGAL_ORG_NAME || !config.LEGAL_CONTACT_EMAIL)
+    w.push('LEGAL_ORG_NAME / LEGAL_CONTACT_EMAIL が未設定です。/privacy と /terms を審査に提出する前に設定してください。');
   return w;
 }
+
+export const legalUrls = () => ({
+  privacy: `${config.PUBLIC_URL}/privacy`,
+  terms: `${config.PUBLIC_URL}/terms`,
+});

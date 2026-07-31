@@ -112,6 +112,29 @@ async function loadStatus() {
     ? keys.map((k) => `<div class="line"><span>${STATUS_LABELS[k]}</span><span>${stats[k]} 件</span></div>`).join('')
     : '<p class="hint">まだジョブはありません。</p>';
 
+  $('#console-urls').innerHTML = [
+    ['プライバシーポリシー URL', s.legal.privacy],
+    ['利用規約 URL', s.legal.terms],
+    ['YouTube リダイレクトURI', s.redirectUris.youtube],
+    ['TikTok リダイレクトURI', s.redirectUris.tiktok],
+    ['TikTok Web/Desktop URL', s.publicUrl],
+  ]
+    .map(
+      ([k, v]) =>
+        `<div>${esc(k)}</div><div><code>${esc(v)}</code>
+         <button class="btn btn-ghost btn-copy" data-copy="${esc(v)}">コピー</button></div>`,
+    )
+    .join('');
+
+  $$('#console-urls .btn-copy').forEach((b) =>
+    b.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(b.dataset.copy);
+      const original = b.textContent;
+      b.textContent = 'コピーしました';
+      setTimeout(() => { b.textContent = original; }, 1500);
+    }),
+  );
+
   $('#runtime-config').innerHTML = [
     ['公開URL', s.publicUrl],
     ['新着チェック間隔', `${s.pollIntervalMinutes} 分`],

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { browserAvailable, checkLogin, normaliseStorageState } from '../../browser/session.js';
-import { config, configWarnings } from '../../config.js';
+import { config, configWarnings, legalUrls } from '../../config.js';
 import {
   browserSessionInfo,
   createTemplate,
@@ -74,6 +74,13 @@ apiRouter.get(
     return {
       warnings: configWarnings(),
       publicUrl: config.PUBLIC_URL,
+      // Surfaced so the operator can copy them straight into the Google /
+      // TikTok developer consoles instead of assembling them by hand.
+      legal: legalUrls(),
+      redirectUris: {
+        youtube: `${config.PUBLIC_URL}/oauth/youtube/callback`,
+        tiktok: `${config.PUBLIC_URL}/oauth/tiktok/callback`,
+      },
       dryRun: config.DRY_RUN,
       pollIntervalMinutes: config.POLL_INTERVAL_MINUTES,
       maxVideoAgeHours: config.MAX_VIDEO_AGE_HOURS,
