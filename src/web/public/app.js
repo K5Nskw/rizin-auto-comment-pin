@@ -490,6 +490,9 @@ function playlistRow(p = { key: '', playlistId: '', label: '', order: 'newest' }
           order: $('.pl-order', wrap).value,
         },
       });
+      // Reflect the normalised ID back into the field so a pasted URL is
+      // visibly converted rather than silently reinterpreted each time.
+      if (r.playlistId) $('.pl-id', wrap).value = r.playlistId;
       msg.innerHTML = `<span class="ok">最新動画: ${esc(r.title)}</span><br>
         <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>`;
       msg.className = 'form-message pl-msg';

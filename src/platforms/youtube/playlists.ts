@@ -48,22 +48,74 @@ interface PlaylistItem {
 }
 
 /**
+ * Accepts a bare ID or any YouTube URL containing one. Pasting the whole
+ * playlist URL is the natural thing to do, and the API answers a URL with an
+ * opaque "Invalid Value" that says nothing about the cause.
+ */
+export function normalisePlaylistId(input: string): string {
+  const trimmed = input.trim().replace(/^["'<]|["'>]$/g, '');
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const list = new URL(trimmed).searchParams.get('list');
+      if (list) return list.trim();
+    } catch {
+      /* fall through to the raw value */
+    }
+  }
+
+  // Also handles a bare "list=PL..." fragment pasted on its own.
+  const match = trimmed.match(/[?&]?list=([^&\s]+)/);
+  if (match?.[1]) return match[1];
+
+  return trimmed;
+}
+
+const PLAYLIST_ID_HINT =
+  '再生リストIDは PL / UU / FL / LL / OL などで始まる文字列です。' +
+  'YouTubeの再生リストを開いたときのURL「...playlist?list=PLxxxxxxxx」の list= 以降を入力してください。' +
+  '（URLをそのまま貼り付けても自動で抽出します）';
+
+/**
  * "Latest" depends on how the playlist is maintained: some are curated with
  * the newest entry pinned to the top, some are appended to. The operator picks
  * which rule applies rather than us guessing.
  */
 export async function fetchLatestFromPlaylist(config: PlaylistConfig): Promise<PlaylistVideo> {
-  const cacheKey = `${config.playlistId}:${config.order}`;
+  const playlistId = normalisePlaylistId(config.playlistId);
+  const cacheKey = `${playlistId}:${config.order}`;
   const hit = cache.get(cacheKey);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.video;
 
-  const data = await call<{ items?: PlaylistItem[] }>('/playlistItems', {
-    query: {
-      part: 'snippet,contentDetails,status',
-      playlistId: config.playlistId,
-      maxResults: '50',
-    },
-  });
+  const fetchItems = async (part: string) =>
+    call<{ items?: PlaylistItem[] }>('/playlistItems', {
+      query: { part, playlistId, maxResults: '50' },
+    });
+
+  let data: { items?: PlaylistItem[] };
+  try {
+    data = await fetchItems('snippet,contentDetails,status');
+  } catch (e) {
+    const message = errMessage(e);
+    // Retry without `status` to distinguish an unsupported part from a bad
+    // playlist ID — both surface as an opaque 400.
+    if (/\b400\b/.test(message)) {
+      try {
+        data = await fetchItems('snippet,contentDetails');
+        log.warn('playlistItems: status part rejected, continuing without it');
+      } catch {
+        throw new Error(
+          `再生リストID「${playlistId}」を取得できませんでした（${message}）。${PLAYLIST_ID_HINT}`,
+        );
+      }
+    } else if (/404|playlistNotFound/i.test(message)) {
+      throw new Error(
+        `再生リスト「${playlistId}」が見つかりません。IDが正しいか、再生リストが「非公開」になっていないか確認してください。`,
+      );
+    } else {
+      throw e;
+    }
+  }
 
   // Deleted and private entries stay in the playlist but have no usable video.
   const items = (data.items ?? []).filter(
@@ -74,7 +126,9 @@ export async function fetchLatestFromPlaylist(config: PlaylistConfig): Promise<P
   );
 
   if (!items.length) {
-    throw new Error(`再生リスト ${config.playlistId} に公開中の動画がありません`);
+    throw new Error(
+      `再生リスト「${playlistId}」に公開中の動画がありません（非公開・削除済みの動画は除外されます）。`,
+    );
   }
 
   let chosen: PlaylistItem;

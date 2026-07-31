@@ -30,6 +30,7 @@ import { deleteComment } from '../../platforms/youtube/api.js';
 import {
   clearPlaylistCache,
   fetchLatestFromPlaylist,
+  normalisePlaylistId,
   playlistVariableNames,
   resolvePlaylistVariables,
 } from '../../platforms/youtube/playlists.js';
@@ -176,7 +177,11 @@ const playlistSchema = z.object({
   key: z
     .string()
     .regex(/^[a-zA-Z0-9_]{1,24}$/, 'キーは半角英数字とアンダースコア（24文字以内）にしてください'),
-  playlistId: z.string().min(2, '再生リストIDを入力してください'),
+  // Normalised on the way in, so a pasted URL is stored as a bare ID.
+  playlistId: z
+    .string()
+    .min(2, '再生リストIDを入力してください')
+    .transform((v) => normalisePlaylistId(v)),
   label: z.string().default(''),
   order: z.enum(['newest', 'first', 'last']).default('newest'),
 });
@@ -209,7 +214,9 @@ apiRouter.post(
   handle(async (req) => {
     const config = playlistSchema.parse(req.body);
     clearPlaylistCache();
-    return fetchLatestFromPlaylist(config);
+    const video = await fetchLatestFromPlaylist(config);
+    // Echo the normalised ID so a pasted URL visibly resolves to an ID.
+    return { ...video, playlistId: config.playlistId };
   }),
 );
 
