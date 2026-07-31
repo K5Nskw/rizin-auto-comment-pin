@@ -431,6 +431,110 @@ $('#btn-delete-template').addEventListener('click', async () => {
   }
 });
 
+/* -------------------------------- playlists ------------------------------- */
+
+function playlistRow(p = { key: '', playlistId: '', label: '', order: 'newest' }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'body-item playlist-row';
+  wrap.innerHTML = `
+    <div class="row">
+      <label>キー（変数名に使われます）
+        <input class="pl-key" type="text" value="${esc(p.key)}" placeholder="highlight">
+      </label>
+      <label>表示名
+        <input class="pl-label" type="text" value="${esc(p.label)}" placeholder="ハイライト再生リスト">
+      </label>
+    </div>
+    <div class="row">
+      <label>再生リストID
+        <input class="pl-id" type="text" value="${esc(p.playlistId)}" placeholder="PLxxxxxxxxxxxx">
+      </label>
+      <label>どれを「最新」とするか
+        <select class="pl-order">
+          <option value="newest">公開日が最も新しい動画</option>
+          <option value="first">再生リストの先頭</option>
+          <option value="last">再生リストの末尾</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <button type="button" class="btn btn-ghost pl-test">この再生リストをテスト</button>
+      <button type="button" class="btn btn-danger pl-remove">削除</button>
+      <span class="form-message pl-msg"></span>
+    </div>
+    <div class="hint pl-vars"></div>`;
+
+  $('.pl-order', wrap).value = p.order || 'newest';
+
+  const updateVars = () => {
+    const k = $('.pl-key', wrap).value.trim();
+    $('.pl-vars', wrap).innerHTML = k
+      ? `使える変数: <code>{{playlist_${esc(k)}_url}}</code> <code>{{playlist_${esc(k)}_title}}</code>`
+      : 'キーを入力すると、使える変数名が表示されます。';
+  };
+  $('.pl-key', wrap).addEventListener('input', updateVars);
+  updateVars();
+
+  $('.pl-remove', wrap).addEventListener('click', () => wrap.remove());
+
+  $('.pl-test', wrap).addEventListener('click', async () => {
+    const msg = $('.pl-msg', wrap);
+    message(msg, '取得中…', 'ok');
+    try {
+      const r = await api('/playlists/test', {
+        method: 'POST',
+        body: {
+          key: $('.pl-key', wrap).value.trim() || 'test',
+          playlistId: $('.pl-id', wrap).value.trim(),
+          label: $('.pl-label', wrap).value.trim(),
+          order: $('.pl-order', wrap).value,
+        },
+      });
+      msg.innerHTML = `<span class="ok">最新動画: ${esc(r.title)}</span><br>
+        <a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url)}</a>`;
+      msg.className = 'form-message pl-msg';
+    } catch (err) {
+      message(msg, err.message, 'err');
+    }
+  });
+
+  return wrap;
+}
+
+async function loadPlaylists() {
+  const list = await api('/playlists');
+  const el = $('#playlist-list');
+  el.innerHTML = '';
+  if (!list.length) el.appendChild(playlistRow());
+  else list.forEach((p) => el.appendChild(playlistRow(p)));
+}
+
+$('#btn-add-playlist').addEventListener('click', () => {
+  $('#playlist-list').appendChild(playlistRow());
+});
+
+$('#btn-save-playlists').addEventListener('click', async () => {
+  const msg = $('#playlist-message');
+  const playlists = $$('#playlist-list .playlist-row')
+    .map((w) => ({
+      key: $('.pl-key', w).value.trim(),
+      playlistId: $('.pl-id', w).value.trim(),
+      label: $('.pl-label', w).value.trim(),
+      order: $('.pl-order', w).value,
+    }))
+    // A blank row is the empty starting state, not something to save.
+    .filter((p) => p.key || p.playlistId);
+
+  try {
+    await api('/playlists', { method: 'PUT', body: { playlists } });
+    message(msg, '保存しました', 'ok');
+    await loadVariables();
+    runPreview();
+  } catch (err) {
+    message(msg, err.message, 'err');
+  }
+});
+
 /* --------------------------------- preview -------------------------------- */
 
 async function runPreview() {
@@ -757,6 +861,7 @@ async function init() {
   if (!ready) return;
   await loadTemplates().catch(() => {});
   await loadVariables().catch(() => {});
+  await loadPlaylists().catch(() => {});
   runPreview();
 }
 

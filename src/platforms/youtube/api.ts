@@ -4,7 +4,10 @@ import { getAccessToken } from './oauth.js';
 const log = createLogger('youtube:api');
 const API = 'https://www.googleapis.com/youtube/v3';
 
-async function call<T>(path: string, init: RequestInit & { query?: Record<string, string> } = {}): Promise<T> {
+export async function call<T>(
+  path: string,
+  init: RequestInit & { query?: Record<string, string> } = {},
+): Promise<T> {
   const token = await getAccessToken();
   const url = new URL(`${API}${path}`);
   for (const [k, v] of Object.entries(init.query ?? {})) url.searchParams.set(k, v);

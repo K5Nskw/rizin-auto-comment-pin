@@ -13,6 +13,7 @@ import {
   deleteTemplate,
   getAccount,
   getJob,
+  getPlaylists,
   getSetting,
   getWatermark,
   jobStats,
@@ -21,10 +22,17 @@ import {
   recentLogs,
   resetWatermark,
   saveBrowserSession,
+  setPlaylists,
   updateTemplate,
 } from '../../db/repo.js';
 import { errMessage } from '../../logger.js';
 import { deleteComment } from '../../platforms/youtube/api.js';
+import {
+  clearPlaylistCache,
+  fetchLatestFromPlaylist,
+  playlistVariableNames,
+  resolvePlaylistVariables,
+} from '../../platforms/youtube/playlists.js';
 import { subscribe, subscriptionState } from '../../platforms/youtube/websub.js';
 import { pollAll } from '../../scheduler.js';
 import {
@@ -54,7 +62,11 @@ const templateSchema = z.object({
   delaySeconds: z.number().int().min(0).max(86_400),
 });
 
-/** Wraps a handler so any throw becomes a clean JSON error instead of a 500 page. */
+/**
+ * Wraps a handler so any throw becomes a clean JSON error instead of a 500
+ * page. Zod errors are flattened to their messages — the raw issue array is
+ * unreadable in an alert box.
+ */
 const handle =
   (fn: (req: any, res: any) => Promise<unknown>) =>
   async (req: any, res: any): Promise<void> => {
@@ -62,7 +74,11 @@ const handle =
       const result = await fn(req, res);
       if (!res.headersSent) res.json(result ?? { ok: true });
     } catch (e) {
-      if (!res.headersSent) res.status(400).json({ ok: false, error: errMessage(e) });
+      const error =
+        e instanceof z.ZodError
+          ? e.issues.map((i) => i.message).join(' / ')
+          : errMessage(e);
+      if (!res.headersSent) res.status(400).json({ ok: false, error });
     }
   };
 
@@ -139,9 +155,63 @@ apiRouter.get(
   }),
 );
 
-apiRouter.get('/variables', (_req, res) => {
-  res.json(TEMPLATE_VARIABLES);
+apiRouter.get(
+  '/variables',
+  handle(async () => {
+    const playlists = await getPlaylists();
+    return [
+      ...TEMPLATE_VARIABLES,
+      ...playlists.flatMap((p) => [
+        { token: `{{playlist_${p.key}_url}}`, description: `${p.label || p.key} の最新動画URL` },
+        { token: `{{playlist_${p.key}_title}}`, description: `${p.label || p.key} の最新動画タイトル` },
+      ]),
+    ];
+  }),
+);
+
+/* -------------------------------- playlists -------------------------------- */
+
+const playlistSchema = z.object({
+  // Becomes part of a {{variable}} name, so it has to match the token pattern.
+  key: z
+    .string()
+    .regex(/^[a-zA-Z0-9_]{1,24}$/, 'キーは半角英数字とアンダースコア（24文字以内）にしてください'),
+  playlistId: z.string().min(2, '再生リストIDを入力してください'),
+  label: z.string().default(''),
+  order: z.enum(['newest', 'first', 'last']).default('newest'),
 });
+
+apiRouter.get(
+  '/playlists',
+  handle(async () => getPlaylists()),
+);
+
+apiRouter.put(
+  '/playlists',
+  handle(async (req) => {
+    const input = z.object({ playlists: z.array(playlistSchema) }).parse(req.body);
+
+    const keys = new Set<string>();
+    for (const p of input.playlists) {
+      if (keys.has(p.key)) throw new Error(`キー「${p.key}」が重複しています`);
+      keys.add(p.key);
+    }
+
+    await setPlaylists(input.playlists);
+    clearPlaylistCache();
+    return { ok: true, playlists: input.playlists };
+  }),
+);
+
+/** Resolves one playlist now, so the operator can confirm the ID before saving. */
+apiRouter.post(
+  '/playlists/test',
+  handle(async (req) => {
+    const config = playlistSchema.parse(req.body);
+    clearPlaylistCache();
+    return fetchLatestFromPlaylist(config);
+  }),
+);
 
 /* -------------------------------- templates -------------------------------- */
 
@@ -154,7 +224,7 @@ apiRouter.post(
   '/templates',
   handle(async (req) => {
     const input = templateSchema.parse(req.body);
-    return createTemplate(cleanBodies(input));
+    return createTemplate(await cleanBodies(input));
   }),
 );
 
@@ -162,7 +232,7 @@ apiRouter.put(
   '/templates/:id',
   handle(async (req) => {
     const input = templateSchema.parse(req.body);
-    const updated = await updateTemplate(Number(req.params.id), cleanBodies(input));
+    const updated = await updateTemplate(Number(req.params.id), await cleanBodies(input));
     if (!updated) throw new Error('テンプレートが見つかりません');
     return updated;
   }),
@@ -176,12 +246,15 @@ apiRouter.delete(
   }),
 );
 
-function cleanBodies<T extends { bodies: string[]; matchType: string; matchValue: string }>(input: T): T {
+async function cleanBodies<T extends { bodies: string[]; matchType: string; matchValue: string }>(
+  input: T,
+): Promise<T> {
   const bodies = input.bodies.map((b) => b.trim()).filter(Boolean);
   if (!bodies.length) throw new Error('コメント本文が空です');
 
+  const playlistNames = (await getPlaylists()).flatMap((p) => playlistVariableNames(p.key));
   for (const b of bodies) {
-    const errors = validateTemplateBody(b);
+    const errors = validateTemplateBody(b, playlistNames);
     if (errors.length) throw new Error(errors.join(' / '));
   }
   if (input.matchType === 'regex') {
@@ -239,14 +312,22 @@ apiRouter.post(
       return { matched: null, rendered: '', note: '一致するテンプレートがありません' };
     }
 
-    const rendered = renderTemplate(source, ctx);
+    // Resolve playlist links for real, so the preview shows the actual URL
+    // that would be posted rather than a placeholder.
+    const playlists = await getPlaylists();
+    const resolved = await resolvePlaylistVariables(source, playlists);
+
+    const rendered = renderTemplate(source, { ...ctx, extra: resolved.values });
     const { text, truncated } = clampComment(rendered, input.platform);
     return {
       matched: matched ? { id: matched.id, name: matched.name, pin: matched.pin, delaySeconds: matched.delaySeconds } : null,
       rendered: text,
       length: text.length,
       truncated,
-      warnings: validateTemplateBody(source),
+      warnings: [
+        ...validateTemplateBody(source, playlists.flatMap((p) => playlistVariableNames(p.key))),
+        ...resolved.errors,
+      ],
     };
   }),
 );

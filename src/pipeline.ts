@@ -1,5 +1,14 @@
 import { config } from './config.js';
-import { createJob, ensureWatermark, getAccount, listTemplates, recordVideo, videoKey } from './db/repo.js';
+import {
+  createJob,
+  ensureWatermark,
+  getAccount,
+  getPlaylists,
+  listTemplates,
+  recordVideo,
+  videoKey,
+} from './db/repo.js';
+import { resolvePlaylistVariables } from './platforms/youtube/playlists.js';
 import { createLogger } from './logger.js';
 import { notify } from './notify/index.js';
 import { clampComment, pickBody, renderTemplate, selectTemplate } from './templates/engine.js';
@@ -87,8 +96,40 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
   let shouldPin = options.forcePin ?? true;
   let delaySeconds = 0;
 
+  const playlists = await getPlaylists();
+
+  /**
+   * Playlist links are resolved before anything is queued. A failure here
+   * stops the job: substituting nothing would publish a comment with a
+   * dangling "→" and no link, which is worse than not commenting.
+   */
+  const resolvePlaylists = async (body: string) => {
+    const { values, errors } = await resolvePlaylistVariables(body, playlists);
+    if (errors.length) {
+      log.error(`playlist resolution failed for ${key}: ${errors.join(' / ')}`);
+      await notify(
+        '⚠️ 再生リストのリンクを取得できませんでした',
+        `${v.title}\n${v.url}\n\n${errors.join('\n')}\n\nリンクが空のまま投稿すると不自然なため、コメントしませんでした。`,
+      );
+    }
+    return { values, failed: errors.length > 0, errors };
+  };
+
   if (options.overrideText) {
-    const clamped = clampComment(options.overrideText, v.platform);
+    const resolved = await resolvePlaylists(options.overrideText);
+    if (resolved.failed) {
+      return { created: false, reason: resolved.errors.join(' / ') };
+    }
+    const rendered = renderTemplate(options.overrideText, {
+      title: v.title,
+      url: v.url,
+      videoId: v.videoId,
+      platform: v.platform,
+      channel: (await getAccount(v.platform))?.displayName ?? '',
+      publishedAt: v.publishedAt ?? new Date(),
+      extra: resolved.values,
+    });
+    const clamped = clampComment(rendered, v.platform);
     if (clamped.truncated) log.warn(`manual comment truncated to platform limit for ${key}`);
     text = clamped.text;
   } else {
@@ -103,7 +144,14 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
       return { created: false, reason: '一致するテンプレートがありません' };
     }
 
-    const rendered = renderTemplate(pickBody(template), {
+    const body = pickBody(template);
+    const resolved = await resolvePlaylists(body);
+    if (resolved.failed) {
+      return { created: false, reason: resolved.errors.join(' / ') };
+    }
+
+    const rendered = renderTemplate(body, {
+      extra: resolved.values,
       title: v.title,
       url: v.url,
       videoId: v.videoId,

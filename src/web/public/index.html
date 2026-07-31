@@ -142,6 +142,25 @@
         </form>
 
         <div class="card">
+          <h3>再生リストの最新動画リンク</h3>
+          <p class="hint">
+            再生リストを登録すると、その<strong>最新動画のURL</strong>をコメントに差し込めます。
+            例：ハイライト再生リストを <code>highlight</code> というキーで登録すると、
+            <code>{{playlist_highlight_url}}</code> が使えるようになります。
+          </p>
+          <p class="hint">
+            再生リストIDは、YouTubeの再生リストURL <code>...playlist?list=<strong>PLxxxxxxxx</strong></code> の
+            <code>list=</code> の後ろの部分です。
+          </p>
+          <div id="playlist-list"></div>
+          <div class="row" style="margin-top:10px">
+            <button type="button" id="btn-add-playlist" class="btn btn-ghost">＋ 再生リストを追加</button>
+            <button type="button" id="btn-save-playlists" class="btn btn-primary">保存</button>
+            <span id="playlist-message" class="form-message"></span>
+          </div>
+        </div>
+
+        <div class="card">
           <h3>プレビュー</h3>
           <p class="hint">この動画タイトルで投稿されたら、実際に何が書き込まれるかを確認できます。</p>
           <label>テスト用の動画タイトル

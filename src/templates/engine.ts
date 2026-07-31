@@ -7,6 +7,8 @@ export interface RenderContext {
   platform: Platform;
   channel: string;
   publishedAt: Date;
+  /** Resolved playlist variables, keyed by their full token name. */
+  extra?: Record<string, string>;
 }
 
 /** Shown in the admin UI so the operator doesn't have to read the docs. */
@@ -64,8 +66,10 @@ export function renderTemplate(body: string, ctx: RenderContext): string {
     weekday,
   };
 
+  const all: Record<string, string> = { ...vars, ...(ctx.extra ?? {}) };
+
   let out = body.replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, name: string) =>
-    name in vars ? (vars[name] as string) : whole,
+    name in all ? (all[name] as string) : whole,
   );
 
   out = out.replace(/\[\[([^\]]+)\]\]/g, (_whole, group: string) => {
@@ -132,11 +136,16 @@ export function clampComment(text: string, platform: Platform): { text: string; 
   return { text: `${text.slice(0, max - 1)}…`, truncated: true };
 }
 
-export function validateTemplateBody(body: string): string[] {
+/**
+ * `extraNames` carries the playlist variables, which are defined at runtime by
+ * the operator rather than built in.
+ */
+export function validateTemplateBody(body: string, extraNames: string[] = []): string[] {
   const errors: string[] = [];
-  const known = new Set(
-    TEMPLATE_VARIABLES.filter((v) => v.token.startsWith('{{')).map((v) => v.token.slice(2, -2)),
-  );
+  const known = new Set([
+    ...TEMPLATE_VARIABLES.filter((v) => v.token.startsWith('{{')).map((v) => v.token.slice(2, -2)),
+    ...extraNames,
+  ]);
   for (const m of body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)) {
     const name = m[1];
     if (name && !known.has(name)) errors.push(`未知の変数 {{${name}}} が含まれています`);

@@ -1,4 +1,5 @@
 import { openJson, sealJson } from '../crypto.js';
+import type { PlaylistConfig } from '../platforms/youtube/playlists.js';
 import type {
   Account,
   DetectedVideo,
@@ -369,6 +370,14 @@ export async function ensureWatermark(platform: Platform): Promise<{ value: numb
   const now = Date.now();
   await setSetting(key, now);
   return { value: now, justCreated: true };
+}
+
+export async function getPlaylists(): Promise<PlaylistConfig[]> {
+  return (await getSetting<PlaylistConfig[]>('playlists')) ?? [];
+}
+
+export async function setPlaylists(playlists: PlaylistConfig[]): Promise<void> {
+  await setSetting('playlists', playlists);
 }
 
 export async function getWatermark(platform: Platform): Promise<number | null> {
