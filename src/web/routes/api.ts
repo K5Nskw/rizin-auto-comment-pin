@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { bootState, describeDbError } from '../../bootState.js';
-import { browserAvailable, checkLogin, normaliseStorageState } from '../../browser/session.js';
+import { browserAvailable, checkLogin, diagnoseCookies, normaliseStorageState } from '../../browser/session.js';
 import { config, configWarnings, legalUrls } from '../../config.js';
 import {
   browserSessionInfo,
@@ -412,6 +412,16 @@ apiRouter.post(
 apiRouter.post(
   '/browser/:platform/check',
   handle(async (req) => checkLogin(platformSchema.parse(req.params.platform) as Platform)),
+);
+
+/**
+ * Inspects the stored cookies without launching a browser. Instant, and it
+ * catches the common case — an export taken from the wrong site or profile —
+ * which otherwise looks identical to an expired session.
+ */
+apiRouter.get(
+  '/browser/:platform/diagnose',
+  handle(async (req) => diagnoseCookies(platformSchema.parse(req.params.platform) as Platform)),
 );
 
 apiRouter.delete(

@@ -668,15 +668,37 @@ $$('[data-save-session]').forEach((btn) =>
   }),
 );
 
+$$('[data-diagnose]').forEach((btn) =>
+  btn.addEventListener('click', async () => {
+    const p = btn.dataset.diagnose;
+    const msg = $(`#session-msg-${p}`);
+    try {
+      const r = await api(`/browser/${p}/diagnose`);
+      const extra = r.expiringSoon.length
+        ? `<br>7日以内に失効する Cookie: ${esc(r.expiringSoon.slice(0, 5).join(', '))}`
+        : '';
+      msg.innerHTML = `<span class="${r.ok ? 'ok' : 'err'}">${esc(r.message)}</span>${extra}`;
+      msg.className = 'form-message';
+    } catch (err) {
+      message(msg, err.message, 'err');
+    }
+  }),
+);
+
 $$('[data-check-session]').forEach((btn) =>
   btn.addEventListener('click', async () => {
     const p = btn.dataset.checkSession;
     const msg = $(`#session-msg-${p}`);
-    message(msg, '確認中…（20秒ほどかかります）', 'ok');
+    message(msg, '確認中…（30秒ほどかかります）', 'ok');
     btn.disabled = true;
     try {
       const r = await api(`/browser/${p}/check`, { method: 'POST' });
-      message(msg, r.detail, r.loggedIn ? 'ok' : 'err');
+      // Show the raw signals: "not logged in" alone gives nothing to act on.
+      const signals = (r.signals || []).map((s) => `<li>${esc(s)}</li>`).join('');
+      msg.innerHTML =
+        `<span class="${r.loggedIn ? 'ok' : 'err'}">${esc(r.detail)}</span>` +
+        (signals ? `<ul style="margin:6px 0 0;font-size:12px;color:var(--muted)">${signals}</ul>` : '');
+      msg.className = 'form-message';
     } catch (err) {
       message(msg, err.message, 'err');
     } finally {
