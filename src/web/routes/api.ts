@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { bootState, describeDbError } from '../../bootState.js';
 import { browserAvailable, checkLogin, normaliseStorageState } from '../../browser/session.js';
 import { config, configWarnings, legalUrls } from '../../config.js';
 import {
@@ -64,6 +65,24 @@ const handle =
 apiRouter.get(
   '/status',
   handle(async () => {
+    // Every other field needs the database. When it isn't up yet, return the
+    // reason rather than a generic query failure — this is the screen the
+    // operator lands on after a failed deploy.
+    if (!bootState.dbReady) {
+      return {
+        dbReady: false,
+        dbError: describeDbError(),
+        dbAttempts: bootState.dbAttempts,
+        warnings: configWarnings(),
+        publicUrl: config.PUBLIC_URL,
+        legal: legalUrls(),
+        redirectUris: {
+          youtube: `${config.PUBLIC_URL}/oauth/youtube/callback`,
+          tiktok: `${config.PUBLIC_URL}/oauth/tiktok/callback`,
+        },
+      };
+    }
+
     const [youtube, tiktok, stats, websub, sessions] = await Promise.all([
       getAccount('youtube'),
       getAccount('tiktok'),
@@ -72,6 +91,7 @@ apiRouter.get(
       browserSessionInfo(),
     ]);
     return {
+      dbReady: true,
       warnings: configWarnings(),
       publicUrl: config.PUBLIC_URL,
       // Surfaced so the operator can copy them straight into the Google /

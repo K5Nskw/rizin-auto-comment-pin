@@ -8,8 +8,11 @@ import { createLogger, setLogSink } from '../logger.js';
 const log = createLogger('db');
 
 export const pool = new pg.Pool({
-  connectionString: config.DATABASE_URL,
+  // Empty when unconfigured; index.ts checks for that before using the pool
+  // and reports it through /healthz rather than connecting to a default host.
+  connectionString: config.DATABASE_URL || undefined,
   max: 5,
+  connectionTimeoutMillis: 10_000,
   // Railway's internal Postgres URL doesn't need TLS; public proxy URLs do and
   // present a self-signed chain, so accept it rather than failing to boot.
   ssl: /(\.proxy\.rlwy\.net|sslmode=require)/.test(config.DATABASE_URL)
@@ -17,10 +20,28 @@ export const pool = new pg.Pool({
     : undefined,
 });
 
+// An idle client error is emitted on the pool, and an unhandled 'error' event
+// would take the whole process down — e.g. when Railway restarts Postgres.
+pool.on('error', (e) => log.error(`idle client error: ${e.message}`));
+
+/**
+ * Without this, an unset DATABASE_URL makes pg quietly fall back to
+ * localhost:5432 and every query fails with a bare ECONNREFUSED that says
+ * nothing about the actual problem.
+ */
+function assertConfigured(): void {
+  if (!config.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL が設定されていません。Railway で「New → Database → Add PostgreSQL」を実行してください。',
+    );
+  }
+}
+
 export async function query<T extends pg.QueryResultRow = pg.QueryResultRow>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
+  assertConfigured();
   const res = await pool.query<T>(text, params);
   return res.rows;
 }
@@ -34,6 +55,7 @@ export async function queryOne<T extends pg.QueryResultRow = pg.QueryResultRow>(
 }
 
 export async function migrate(): Promise<void> {
+  assertConfigured();
   const here = dirname(fileURLToPath(import.meta.url));
   const sql = await readFile(resolve(here, 'schema.sql'), 'utf8');
   await pool.query(sql);

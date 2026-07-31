@@ -18,7 +18,10 @@ const int = (def: number) =>
 const schema = z.object({
   PORT: int(3000),
   PUBLIC_URL: z.string().optional().default(''),
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required (Railway の Postgres を追加してください)'),
+  // Intentionally not required: a missing DATABASE_URL is reported through
+  // /healthz and the dashboard instead of killing the process at startup,
+  // which on Railway is indistinguishable from any other boot failure.
+  DATABASE_URL: z.string().optional().default(''),
 
   ADMIN_USER: z.string().optional().default('admin'),
   ADMIN_PASSWORD: z.string().optional().default(''),
@@ -74,6 +77,8 @@ export const oauthRedirect = (platform: 'youtube' | 'tiktok') =>
 /** Warnings surfaced on the dashboard so misconfiguration is visible, not silent. */
 export function configWarnings(): string[] {
   const w: string[] = [];
+  if (!config.DATABASE_URL)
+    w.push('DATABASE_URL が未設定です。Railway で「New → Database → Add PostgreSQL」を実行してください。');
   if (!config.ADMIN_PASSWORD) w.push('ADMIN_PASSWORD が未設定です。管理画面が誰でも開ける状態です。');
   if (!config.ENCRYPTION_KEY) w.push('ENCRYPTION_KEY が未設定です。トークンが平文で保存されます。');
   else if (Buffer.from(config.ENCRYPTION_KEY, 'hex').length !== 32)

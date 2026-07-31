@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { bootState, describeDbError } from '../bootState.js';
 import { config } from '../config.js';
 import { createLogger } from '../logger.js';
 import { requireAdmin } from './auth.js';
@@ -20,8 +21,17 @@ export function createServer() {
   // verify its HMAC signature.
   app.use('/webhooks', webhooksRouter);
 
+  // Reports 200 even while the database is still failing, so the deploy goes
+  // live and the admin UI can show the actual reason. `db` carries the real
+  // state for anyone checking properly.
   app.get('/healthz', (_req, res) => {
-    res.json({ ok: true, uptime: process.uptime() });
+    res.json({
+      ok: true,
+      uptime: process.uptime(),
+      db: bootState.dbReady ? 'ready' : 'error',
+      dbError: describeDbError(),
+      dbAttempts: bootState.dbAttempts,
+    });
   });
 
   // Public on purpose: platform reviewers must be able to open these without

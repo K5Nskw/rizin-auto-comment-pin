@@ -51,13 +51,65 @@ const STATUS_LABELS = {
   failed: '失敗',
 };
 
+function renderConsoleUrls(s) {
+  $('#console-urls').innerHTML = [
+    ['プライバシーポリシー URL', s.legal.privacy],
+    ['利用規約 URL', s.legal.terms],
+    ['YouTube リダイレクトURI', s.redirectUris.youtube],
+    ['TikTok リダイレクトURI', s.redirectUris.tiktok],
+    ['TikTok Web/Desktop URL', s.publicUrl],
+  ]
+    .map(
+      ([k, v]) =>
+        `<div>${esc(k)}</div><div><code>${esc(v)}</code>
+         <button class="btn btn-ghost btn-copy" data-copy="${esc(v)}">コピー</button></div>`,
+    )
+    .join('');
+
+  $$('#console-urls .btn-copy').forEach((b) =>
+    b.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(b.dataset.copy);
+      const original = b.textContent;
+      b.textContent = 'コピーしました';
+      setTimeout(() => { b.textContent = original; }, 1500);
+    }),
+  );
+}
+
 async function loadStatus() {
   let s;
   try {
     s = await api('/status');
   } catch (e) {
     $('#warnings').innerHTML = `<div class="warning-box">状態を取得できませんでした: ${esc(e.message)}</div>`;
-    return;
+    return false;
+  }
+
+  // Database down: this is the screen shown after a failed deploy, so lead
+  // with the reason and stop before rendering panels that have no data.
+  if (s.dbReady === false) {
+    $('#warnings').innerHTML = `
+      <div class="warning-box" style="border-color:var(--err)">
+        <strong style="color:var(--err)">データベースに接続できていません</strong>
+        <p style="margin:8px 0">${esc(s.dbError || '')}</p>
+        <p style="margin:8px 0 0">
+          接続を${s.dbAttempts}回試行しました。自動で再試行を続けます。<br>
+          Railway で <strong>New → Database → Add PostgreSQL</strong> を実行すると
+          <code>DATABASE_URL</code> が自動で設定されます。
+        </p>
+      </div>
+      ${
+        s.warnings.length
+          ? `<div class="warning-box"><strong>他の設定</strong><ul>${s.warnings
+              .map((w) => `<li>${esc(w)}</li>`)
+              .join('')}</ul></div>`
+          : ''
+      }`;
+    renderConsoleUrls(s);
+    for (const id of ['#yt-status', '#tt-status', '#browser-status', '#job-stats']) {
+      $(id).innerHTML = '<p class="hint">データベース接続の復旧を待っています。</p>';
+    }
+    return false;
   }
 
   $('#dry-run-badge').hidden = !s.dryRun;
@@ -112,28 +164,7 @@ async function loadStatus() {
     ? keys.map((k) => `<div class="line"><span>${STATUS_LABELS[k]}</span><span>${stats[k]} 件</span></div>`).join('')
     : '<p class="hint">まだジョブはありません。</p>';
 
-  $('#console-urls').innerHTML = [
-    ['プライバシーポリシー URL', s.legal.privacy],
-    ['利用規約 URL', s.legal.terms],
-    ['YouTube リダイレクトURI', s.redirectUris.youtube],
-    ['TikTok リダイレクトURI', s.redirectUris.tiktok],
-    ['TikTok Web/Desktop URL', s.publicUrl],
-  ]
-    .map(
-      ([k, v]) =>
-        `<div>${esc(k)}</div><div><code>${esc(v)}</code>
-         <button class="btn btn-ghost btn-copy" data-copy="${esc(v)}">コピー</button></div>`,
-    )
-    .join('');
-
-  $$('#console-urls .btn-copy').forEach((b) =>
-    b.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(b.dataset.copy);
-      const original = b.textContent;
-      b.textContent = 'コピーしました';
-      setTimeout(() => { b.textContent = original; }, 1500);
-    }),
-  );
+  renderConsoleUrls(s);
 
   $('#runtime-config').innerHTML = [
     ['公開URL', s.publicUrl],
@@ -143,6 +174,8 @@ async function loadStatus() {
   ]
     .map(([k, v]) => `<div>${esc(k)}</div><div>${esc(v)}</div>`)
     .join('');
+
+  return true;
 }
 
 $('#btn-poll').addEventListener('click', async (e) => {
@@ -552,8 +585,25 @@ $$('[data-screenshot]').forEach((btn) =>
 
 /* ---------------------------------- init ---------------------------------- */
 
-loadStatus();
-loadTemplates();
-loadVariables();
-runPreview();
-setInterval(loadStatus, 30_000);
+/**
+ * Template and preview loading needs the database. When it is down, loading
+ * them anyway just produced unhandled rejections and an empty screen with no
+ * explanation — the dashboard's error box is the useful output instead.
+ */
+async function init() {
+  const ready = await loadStatus();
+  if (!ready) return;
+  await loadTemplates().catch(() => {});
+  await loadVariables().catch(() => {});
+  runPreview();
+}
+
+init();
+
+// Once the database recovers, pick up the data we skipped on the first pass.
+let wasReady = false;
+setInterval(async () => {
+  const ready = await loadStatus();
+  if (ready && !wasReady) init();
+  wasReady = ready;
+}, 30_000);
