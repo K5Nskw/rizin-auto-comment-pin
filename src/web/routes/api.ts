@@ -14,10 +14,12 @@ import {
   getAccount,
   getJob,
   getSetting,
+  getWatermark,
   jobStats,
   listJobs,
   listTemplates,
   recentLogs,
+  resetWatermark,
   saveBrowserSession,
   updateTemplate,
 } from '../../db/repo.js';
@@ -87,12 +89,14 @@ apiRouter.get(
       };
     }
 
-    const [youtube, tiktok, stats, websub, sessions] = await Promise.all([
+    const [youtube, tiktok, stats, websub, sessions, wmYoutube, wmTiktok] = await Promise.all([
       getAccount('youtube'),
       getAccount('tiktok'),
       jobStats(),
       subscriptionState(),
       browserSessionInfo(),
+      getWatermark('youtube'),
+      getWatermark('tiktok'),
     ]);
     return {
       dbReady: true,
@@ -108,6 +112,10 @@ apiRouter.get(
       dryRun: config.DRY_RUN,
       pollIntervalMinutes: config.POLL_INTERVAL_MINUTES,
       maxVideoAgeHours: config.MAX_VIDEO_AGE_HOURS,
+      watermarks: {
+        youtube: wmYoutube ? new Date(wmYoutube).toISOString() : null,
+        tiktok: wmTiktok ? new Date(wmTiktok).toISOString() : null,
+      },
       browser: {
         enabled: config.ENABLE_BROWSER_AUTOMATION,
         available: await browserAvailable(),
@@ -356,6 +364,16 @@ apiRouter.post(
   handle(async (req) => {
     await deleteAccount(platformSchema.parse(req.params.platform));
     return { ok: true };
+  }),
+);
+
+/** Re-arms the cutoff at "now", so nothing already published becomes eligible. */
+apiRouter.post(
+  '/watermark/:platform/reset',
+  handle(async (req) => {
+    const platform = platformSchema.parse(req.params.platform) as Platform;
+    await resetWatermark(platform);
+    return { ok: true, at: new Date().toISOString() };
   }),
 );
 

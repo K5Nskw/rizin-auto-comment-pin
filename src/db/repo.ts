@@ -350,6 +350,36 @@ export async function getSetting<T>(key: string): Promise<T | null> {
   return row ? row.value : null;
 }
 
+/**
+ * The cutoff that decides what counts as "new".
+ *
+ * An age-based window is not enough on its own: anything published inside that
+ * window at the moment of first deploy looks new and gets commented on, which
+ * is exactly the accident this now prevents. Only videos published *after* the
+ * platform was first activated are eligible.
+ *
+ * Returns `justCreated` on the first call, so that pass can be skipped
+ * entirely — a first run primes the cutoff, it never posts.
+ */
+export async function ensureWatermark(platform: Platform): Promise<{ value: number; justCreated: boolean }> {
+  const key = `watermark:${platform}`;
+  const existing = await getSetting<number>(key);
+  if (typeof existing === 'number') return { value: existing, justCreated: false };
+
+  const now = Date.now();
+  await setSetting(key, now);
+  return { value: now, justCreated: true };
+}
+
+export async function getWatermark(platform: Platform): Promise<number | null> {
+  return getSetting<number>(`watermark:${platform}`);
+}
+
+/** Used by the admin UI to re-arm the cutoff at the current moment. */
+export async function resetWatermark(platform: Platform, at: number = Date.now()): Promise<void> {
+  await setSetting(`watermark:${platform}`, at);
+}
+
 export async function setSetting(key: string, value: unknown): Promise<void> {
   await query(
     `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)

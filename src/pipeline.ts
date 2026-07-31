@@ -1,5 +1,5 @@
 import { config } from './config.js';
-import { createJob, getAccount, listTemplates, recordVideo, videoKey } from './db/repo.js';
+import { createJob, ensureWatermark, getAccount, listTemplates, recordVideo, videoKey } from './db/repo.js';
 import { createLogger } from './logger.js';
 import { notify } from './notify/index.js';
 import { clampComment, pickBody, renderTemplate, selectTemplate } from './templates/engine.js';
@@ -14,22 +14,66 @@ export interface IngestResult {
   jobId?: number;
 }
 
+export interface IngestOptions {
+  /**
+   * Skips the watermark and age cutoffs. Only set for an explicit manual
+   * request, where the operator has named the video themselves — automatic
+   * watchers must never bypass it.
+   */
+  ignoreAge?: boolean;
+  /** Posts this exact text instead of selecting a template. */
+  overrideText?: string;
+  /** Overrides the template's pin setting. Used with overrideText. */
+  forcePin?: boolean;
+  /** Ignores DRY_RUN, for a manual "post this one now". */
+  force?: boolean;
+}
+
 /**
  * The single funnel every detection path (WebSub push, RSS poll, TikTok poll,
- * manual trigger) goes through. All de-duplication and safety checks live here
- * so no watcher can bypass them.
+ * profile scrape, manual trigger) goes through. All de-duplication and safety
+ * checks live here so no watcher can bypass them.
  */
-export async function ingestVideo(v: DetectedVideo): Promise<IngestResult> {
+export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {}): Promise<IngestResult> {
   const key = videoKey(v.platform, v.videoId);
   const { isNew } = await recordVideo(v);
 
-  if (!isNew) {
+  // A manual request re-runs on a known video on purpose; the unique index on
+  // jobs.video_key is what actually prevents a duplicate comment.
+  if (!isNew && !options.ignoreAge) {
     return { created: false, reason: 'すでに検知済みの動画です' };
   }
 
-  // Safety net: on first deploy the feed is full of old uploads. Without this
-  // the bot would comment on the entire back catalogue at once.
-  if (v.publishedAt) {
+  if (!options.ignoreAge) {
+    // Primary guard: only videos published after this platform was activated.
+    // An age window alone let anything posted in the preceding 48 hours look
+    // new on first deploy, which meant commenting on already-published videos.
+    const watermark = await ensureWatermark(v.platform);
+
+    if (watermark.justCreated) {
+      log.info(`watermark set for ${v.platform}; existing uploads will not be commented on`);
+      return {
+        created: false,
+        reason: '初回検知のため基準時刻を設定しました。これ以降に公開された動画から対象になります。',
+      };
+    }
+
+    if (!v.publishedAt) {
+      // Without a publication time there is no way to tell a new upload from
+      // an old one, and guessing wrong means commenting on the back catalogue.
+      log.warn(`skipping ${key}: no publish time`);
+      return { created: false, reason: '公開日時が取得できなかったためスキップしました' };
+    }
+
+    if (v.publishedAt.getTime() <= watermark.value) {
+      log.info(`skipping ${key}: published before watermark`);
+      return {
+        created: false,
+        reason: `基準時刻（${new Date(watermark.value).toLocaleString('ja-JP')}）より前に公開された動画のためスキップ`,
+      };
+    }
+
+    // Secondary guard, unchanged: catches a stale queue after downtime.
     const ageHours = (Date.now() - v.publishedAt.getTime()) / 3_600_000;
     if (ageHours > config.MAX_VIDEO_AGE_HOURS) {
       log.info(`skipping old video ${key} (${Math.round(ageHours)}h old)`);
@@ -37,34 +81,52 @@ export async function ingestVideo(v: DetectedVideo): Promise<IngestResult> {
     }
   }
 
-  const templates = await listTemplates();
-  const template = selectTemplate(templates, v);
-  if (!template) {
-    log.warn(`no template matched for ${key}`, { title: v.title });
-    await notify(
-      '⚠️ テンプレートが見つかりません',
-      `${v.title}\n${v.url}\n\n条件に一致する有効なテンプレートがないため、コメントしませんでした。`,
-    );
-    return { created: false, reason: '一致するテンプレートがありません' };
+  let text: string;
+  let templateId: number | null = null;
+  let templateName = '手動指定';
+  let shouldPin = options.forcePin ?? true;
+  let delaySeconds = 0;
+
+  if (options.overrideText) {
+    const clamped = clampComment(options.overrideText, v.platform);
+    if (clamped.truncated) log.warn(`manual comment truncated to platform limit for ${key}`);
+    text = clamped.text;
+  } else {
+    const templates = await listTemplates();
+    const template = selectTemplate(templates, v);
+    if (!template) {
+      log.warn(`no template matched for ${key}`, { title: v.title });
+      await notify(
+        '⚠️ テンプレートが見つかりません',
+        `${v.title}\n${v.url}\n\n条件に一致する有効なテンプレートがないため、コメントしませんでした。`,
+      );
+      return { created: false, reason: '一致するテンプレートがありません' };
+    }
+
+    const rendered = renderTemplate(pickBody(template), {
+      title: v.title,
+      url: v.url,
+      videoId: v.videoId,
+      platform: v.platform,
+      channel: (await getAccount(v.platform))?.displayName ?? '',
+      publishedAt: v.publishedAt ?? new Date(),
+    });
+
+    const clamped = clampComment(rendered, v.platform);
+    if (clamped.truncated) log.warn(`comment truncated to platform limit for ${key}`);
+
+    text = clamped.text;
+    templateId = template.id;
+    templateName = template.name;
+    shouldPin = options.forcePin ?? template.pin;
+    delaySeconds = template.delaySeconds;
   }
-
-  const rendered = renderTemplate(pickBody(template), {
-    title: v.title,
-    url: v.url,
-    videoId: v.videoId,
-    platform: v.platform,
-    channel: (await getAccount(v.platform))?.displayName ?? '',
-    publishedAt: v.publishedAt ?? new Date(),
-  });
-
-  const { text, truncated } = clampComment(rendered, v.platform);
-  if (truncated) log.warn(`comment truncated to platform limit for ${key}`);
 
   if (!text) {
-    return { created: false, reason: 'テンプレートの本文が空です' };
+    return { created: false, reason: 'コメント本文が空です' };
   }
 
-  if (config.DRY_RUN) {
+  if (config.DRY_RUN && !options.force) {
     log.info(`DRY_RUN: would comment on ${key}`, { text });
     await notify('🧪 DRY_RUN', `${v.title}\n${v.url}\n\n--- 投稿予定のコメント ---\n${text}`);
     return { created: false, reason: 'DRY_RUN のため投稿しません', commentText: text };
@@ -73,19 +135,21 @@ export async function ingestVideo(v: DetectedVideo): Promise<IngestResult> {
   const job = await createJob({
     videoKey: key,
     platform: v.platform,
-    templateId: template.id,
-    templateName: template.name,
+    templateId,
+    templateName,
     commentText: text,
-    shouldPin: template.pin,
-    runAfter: new Date(Date.now() + template.delaySeconds * 1000),
+    shouldPin,
+    runAfter: new Date(Date.now() + delaySeconds * 1000),
   });
 
-  if (!job) return { created: false, reason: 'この動画のジョブは既に存在します' };
+  if (!job) return { created: false, reason: 'この動画のジョブは既に存在します（重複投稿は行いません）' };
 
-  log.info(`job #${job.id} queued for ${key}`, { template: template.name, delay: template.delaySeconds });
+  log.info(`job #${job.id} queued for ${key}`, { template: templateName, delay: delaySeconds });
   return {
     created: true,
-    reason: `テンプレート「${template.name}」でジョブを作成しました`,
+    reason: options.overrideText
+      ? '手動指定の本文でジョブを作成しました'
+      : `テンプレート「${templateName}」でジョブを作成しました`,
     commentText: text,
     jobId: job.id,
   };

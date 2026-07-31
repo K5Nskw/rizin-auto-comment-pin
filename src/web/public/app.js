@@ -120,6 +120,16 @@ async function loadStatus() {
         .join('')}</ul></div>`
     : '';
 
+  const watermarkLine = (p) => {
+    const wm = s.watermarks && s.watermarks[p];
+    return `<div class="line"><span>この時刻より後の動画が対象</span><span>${
+      wm ? fmtDate(wm) : '未設定（次回検知時に設定されます）'
+    }</span></div>
+    <div class="line"><span></span><span>
+      <button class="btn btn-ghost btn-copy" data-reset-watermark="${p}">今にリセット</button>
+    </span></div>`;
+  };
+
   const account = (a, extra = '') =>
     a
       ? `<div class="line"><span>状態</span><span class="badge badge-ok">連携済み</span></div>
@@ -134,8 +144,27 @@ async function loadStatus() {
        <div class="line"><span>有効期限</span><span>${fmtDate(s.websub.expiresAt)}</span></div>`
     : `<div class="line"><span>即時通知</span><span class="badge badge-warn">無効（ポーリングのみ）</span></div>`;
 
-  $('#yt-status').innerHTML = account(s.accounts.youtube, s.accounts.youtube ? websub : '');
-  $('#tt-status').innerHTML = account(s.accounts.tiktok);
+  $('#yt-status').innerHTML = account(
+    s.accounts.youtube,
+    s.accounts.youtube ? websub + watermarkLine('youtube') : '',
+  );
+  $('#tt-status').innerHTML = account(
+    s.accounts.tiktok,
+    s.accounts.tiktok ? watermarkLine('tiktok') : '',
+  );
+
+  $$('[data-reset-watermark]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const p = b.dataset.resetWatermark;
+      if (!confirm(`基準時刻を「今」にリセットします。\n\nこれ以降に公開された ${p} の動画だけが対象になります。`)) return;
+      try {
+        await api(`/watermark/${p}/reset`, { method: 'POST' });
+        loadStatus();
+      } catch (e) {
+        alert(e.message);
+      }
+    }),
+  );
 
   const b = s.browser;
   const sessionLine = (p, label) =>
