@@ -1,7 +1,7 @@
 import { browserAvailable, BrowserUnavailable } from './browser/session.js';
 import { commentAndPin, pinExistingComment } from './browser/tiktok.js';
 import { pinComment } from './browser/youtube.js';
-import { claimDueJobs, updateJob } from './db/repo.js';
+import { claimDueJobs, deleteJob, isExcluded, updateJob } from './db/repo.js';
 import { createLogger, errMessage } from './logger.js';
 import { notify, notifyManualAction } from './notify/index.js';
 import { getVideoStatus, insertTopLevelComment } from './platforms/youtube/api.js';
@@ -33,6 +33,15 @@ export async function runDueJobs(): Promise<number> {
 }
 
 async function processJob(job: JobWithVideo): Promise<void> {
+  // Re-checked here as well as at ingest: a video can be excluded after its
+  // job was queued but before the delay elapses, and that must still stop it.
+  const excluded = await isExcluded(job.videoKey);
+  if (excluded && !job.commentDone) {
+    log.info(`job #${job.id} cancelled: ${job.videoKey} is on the exclusion list`);
+    await deleteJob(job.id);
+    return;
+  }
+
   log.info(`processing job #${job.id} (${job.platform}, attempt ${job.attempts + 1})`);
   try {
     if (job.platform === 'youtube') await processYouTube(job);

@@ -202,6 +202,26 @@
         「アカウント連携」タブで連携を解除してください。
       </p>
     </div>
+    <div class="card">
+      <h3>除外リスト（この動画にはコメントしない）</h3>
+      <p class="hint">
+        登録した動画には、条件に一致しても<strong>絶対にコメントしません</strong>。
+        待機中のジョブがあれば、登録と同時に取り消します。
+      </p>
+      <div class="row">
+        <label style="flex:2">動画のURL
+          <input id="exclusion-url" type="text"
+                 placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx">
+        </label>
+        <label style="flex:1">メモ（任意）
+          <input id="exclusion-note" type="text" placeholder="コラボ動画のため">
+        </label>
+        <button id="btn-add-exclusion" class="btn btn-primary">除外する</button>
+      </div>
+      <div id="exclusion-message" class="form-message"></div>
+      <div id="exclusion-list"></div>
+    </div>
+
     <div id="jobs-table"></div>
   </section>
 

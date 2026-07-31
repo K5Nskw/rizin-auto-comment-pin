@@ -372,6 +372,29 @@ export async function ensureWatermark(platform: Platform): Promise<{ value: numb
   return { value: now, justCreated: true };
 }
 
+export interface Exclusion {
+  /** `<platform>:<videoId>` — same shape as videos.key */
+  key: string;
+  platform: Platform;
+  videoId: string;
+  url: string;
+  note: string;
+  addedAt: string;
+}
+
+export async function getExclusions(): Promise<Exclusion[]> {
+  return (await getSetting<Exclusion[]>('exclusions')) ?? [];
+}
+
+export async function setExclusions(list: Exclusion[]): Promise<void> {
+  await setSetting('exclusions', list);
+}
+
+export async function isExcluded(key: string): Promise<Exclusion | null> {
+  const list = await getExclusions();
+  return list.find((e) => e.key === key) ?? null;
+}
+
 export async function getPlaylists(): Promise<PlaylistConfig[]> {
   return (await getSetting<PlaylistConfig[]>('playlists')) ?? [];
 }

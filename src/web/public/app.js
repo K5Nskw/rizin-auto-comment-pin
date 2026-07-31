@@ -35,7 +35,10 @@ $$('.tab').forEach((tab) => {
     $$('.tab-panel').forEach((p) => p.classList.remove('active'));
     tab.classList.add('active');
     $(`#tab-${tab.dataset.tab}`).classList.add('active');
-    if (tab.dataset.tab === 'jobs') loadJobs();
+    if (tab.dataset.tab === 'jobs') {
+      loadJobs();
+      loadExclusions();
+    }
     if (tab.dataset.tab === 'logs') loadLogs();
   });
 });
@@ -577,6 +580,72 @@ $('#preview-platform').addEventListener('change', runPreview);
 
 /* ---------------------------------- jobs ---------------------------------- */
 
+/* ------------------------------- exclusions ------------------------------- */
+
+async function loadExclusions() {
+  const list = await api('/exclusions');
+  const el = $('#exclusion-list');
+
+  if (!list.length) {
+    el.innerHTML = '<p class="hint">除外中の動画はありません。</p>';
+    return;
+  }
+
+  el.innerHTML = `<table>
+    <thead><tr><th>登録日時</th><th>媒体</th><th>動画</th><th>メモ</th><th></th></tr></thead>
+    <tbody>${list
+      .map(
+        (e) => `<tr>
+        <td>${fmtDate(e.addedAt)}</td>
+        <td>${e.platform === 'youtube' ? 'YouTube' : 'TikTok'}</td>
+        <td><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.videoId)}</a></td>
+        <td>${esc(e.note || '—')}</td>
+        <td><button class="btn btn-ghost" data-unexclude="${esc(e.platform)}/${esc(e.videoId)}">解除</button></td>
+      </tr>`,
+      )
+      .join('')}</tbody></table>`;
+
+  $$('[data-unexclude]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('除外を解除しますか？\n\n以降、この動画は通常どおりコメント対象になります。')) return;
+      b.disabled = true;
+      try {
+        await api(`/exclusions/${b.dataset.unexclude}`, { method: 'DELETE' });
+        await loadExclusions();
+      } catch (err) {
+        alert(err.message);
+        b.disabled = false;
+      }
+    }),
+  );
+}
+
+$('#btn-add-exclusion').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const msg = $('#exclusion-message');
+  const url = $('#exclusion-url').value.trim();
+  if (!url) return message(msg, 'URLを入力してください', 'err');
+
+  btn.disabled = true;
+  try {
+    const r = await api('/exclusions', {
+      method: 'POST',
+      body: { url, note: $('#exclusion-note').value.trim() },
+    });
+    $('#exclusion-url').value = '';
+    $('#exclusion-note').value = '';
+    message(msg, r.note || '除外リストに追加しました。', r.alreadyPosted ? 'err' : 'ok');
+    await loadExclusions();
+    await loadJobs();
+  } catch (err) {
+    message(msg, err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/* ---------------------------------- jobs ---------------------------------- */
+
 let jobs = [];
 
 async function loadJobs() {
@@ -614,6 +683,7 @@ async function loadJobs() {
           <button class="btn btn-danger" data-delete-job="${j.id}" style="margin-top:4px">${
             j.commentDone ? 'コメント削除' : '削除'
           }</button>
+          <button class="btn btn-ghost" data-exclude-url="${esc(j.video.url)}" style="margin-top:4px">今後も除外</button>
         </td>
       </tr>`,
       )
@@ -627,6 +697,22 @@ async function loadJobs() {
         await loadJobs();
       } catch (e) {
         alert(e.message);
+        b.disabled = false;
+      }
+    }),
+  );
+
+  $$('[data-exclude-url]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('この動画を除外リストに追加しますか？\n\n待機中のジョブがあれば取り消されます。')) return;
+      b.disabled = true;
+      try {
+        const r = await api('/exclusions', { method: 'POST', body: { url: b.dataset.excludeUrl, note: '' } });
+        if (r.note) alert(r.note);
+        await loadExclusions();
+        await loadJobs();
+      } catch (err) {
+        alert(err.message);
         b.disabled = false;
       }
     }),

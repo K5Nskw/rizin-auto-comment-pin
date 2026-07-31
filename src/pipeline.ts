@@ -4,6 +4,7 @@ import {
   ensureWatermark,
   getAccount,
   getPlaylists,
+  isExcluded,
   listTemplates,
   recordVideo,
   videoKey,
@@ -45,6 +46,18 @@ export interface IngestOptions {
  */
 export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {}): Promise<IngestResult> {
   const key = videoKey(v.platform, v.videoId);
+
+  // Checked first and with no override: an explicitly excluded video must not
+  // be commented on by any path, including a manual trigger.
+  const excluded = await isExcluded(key);
+  if (excluded) {
+    log.info(`skipping ${key}: on the exclusion list`);
+    return {
+      created: false,
+      reason: `除外リストに登録されているためコメントしません${excluded.note ? `（${excluded.note}）` : ''}`,
+    };
+  }
+
   const { isNew } = await recordVideo(v);
 
   // A manual request re-runs on a known video on purpose; the unique index on

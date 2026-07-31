@@ -11,7 +11,9 @@ import {
   deleteJob,
   deleteJobsByStatus,
   deleteTemplate,
+  type Exclusion,
   getAccount,
+  getExclusions,
   getJob,
   getPlaylists,
   getSetting,
@@ -22,9 +24,12 @@ import {
   recentLogs,
   resetWatermark,
   saveBrowserSession,
+  setExclusions,
   setPlaylists,
   updateTemplate,
+  videoKey,
 } from '../../db/repo.js';
+import { PARSE_HINT, parseVideoUrl } from '../../videoUrl.js';
 import { errMessage } from '../../logger.js';
 import { deleteComment } from '../../platforms/youtube/api.js';
 import {
@@ -167,6 +172,79 @@ apiRouter.get(
         { token: `{{playlist_${p.key}_title}}`, description: `${p.label || p.key} の最新動画タイトル` },
       ]),
     ];
+  }),
+);
+
+/* -------------------------------- exclusions ------------------------------- */
+
+apiRouter.get(
+  '/exclusions',
+  handle(async () => getExclusions()),
+);
+
+/**
+ * Adding an exclusion also cancels any job already queued for that video —
+ * excluding a video whose comment is still pending would otherwise post it
+ * anyway once the delay elapsed.
+ */
+apiRouter.post(
+  '/exclusions',
+  handle(async (req) => {
+    const input = z
+      .object({ url: z.string().min(1, 'URLを入力してください'), note: z.string().default('') })
+      .parse(req.body);
+
+    const parsed = parseVideoUrl(input.url);
+    if (!parsed) throw new Error(`URLを認識できませんでした。${PARSE_HINT}`);
+
+    const key = videoKey(parsed.platform, parsed.videoId);
+    const list = await getExclusions();
+    if (list.some((e) => e.key === key)) {
+      throw new Error('この動画はすでに除外リストに登録されています');
+    }
+
+    const entry: Exclusion = {
+      key,
+      platform: parsed.platform,
+      videoId: parsed.videoId,
+      url: parsed.url,
+      note: input.note,
+      addedAt: new Date().toISOString(),
+    };
+    await setExclusions([entry, ...list]);
+
+    // Cancel a queued job, but never touch one whose comment already went out
+    // — removing that is a separate, explicit decision.
+    const jobs = await listJobs(200);
+    const pending = jobs.find((j) => j.videoKey === key && !j.commentDone);
+    let cancelledJob = false;
+    if (pending) {
+      await deleteJob(pending.id);
+      cancelledJob = true;
+    }
+
+    const posted = jobs.find((j) => j.videoKey === key && j.commentDone);
+    return {
+      ok: true,
+      entry,
+      cancelledJob,
+      alreadyPosted: Boolean(posted),
+      note: posted
+        ? 'この動画にはすでにコメントが投稿済みです。今後は対象外になりますが、投稿済みのコメントは「投稿履歴」から削除してください。'
+        : cancelledJob
+          ? '待機中だったジョブを取り消しました。'
+          : undefined,
+    };
+  }),
+);
+
+apiRouter.delete(
+  '/exclusions/:platform/:videoId',
+  handle(async (req) => {
+    const key = videoKey(platformSchema.parse(req.params.platform) as Platform, req.params.videoId);
+    const list = await getExclusions();
+    await setExclusions(list.filter((e) => e.key !== key));
+    return { ok: true };
   }),
 );
 
