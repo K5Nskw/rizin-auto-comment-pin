@@ -428,8 +428,10 @@ $('#preview-platform').addEventListener('change', runPreview);
 
 /* ---------------------------------- jobs ---------------------------------- */
 
+let jobs = [];
+
 async function loadJobs() {
-  const jobs = await api('/jobs');
+  jobs = await api('/jobs');
   if (!jobs.length) {
     $('#jobs-table').innerHTML = '<p class="hint">まだ投稿履歴はありません。</p>';
     return;
@@ -458,7 +460,12 @@ async function loadJobs() {
             ${j.lastError ? `<div class="hint" style="margin:4px 0 0;color:var(--err)">${esc(j.lastError)}</div>` : ''}</td>
         <td>${j.commentDone ? '✅' : '—'} / ${j.shouldPin ? (j.pinDone ? '✅' : '—') : '対象外'}</td>
         <td class="comment">${esc(j.commentText)}</td>
-        <td><button class="btn btn-ghost" data-retry="${j.id}">再実行</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost" data-retry="${j.id}">再実行</button>
+          <button class="btn btn-danger" data-delete-job="${j.id}" style="margin-top:4px">${
+            j.commentDone ? 'コメント削除' : '削除'
+          }</button>
+        </td>
       </tr>`,
       )
       .join('')}</tbody></table>`;
@@ -475,9 +482,100 @@ async function loadJobs() {
       }
     }),
   );
+
+  $$('[data-delete-job]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const id = b.dataset.deleteJob;
+      const job = jobs.find((j) => String(j.id) === id);
+      const posted = job && job.commentDone;
+
+      const message = posted
+        ? '実際に投稿済みのコメントです。\n\n' +
+          (job.platform === 'youtube'
+            ? 'YouTube からこのコメントを削除します。よろしいですか？'
+            : 'TikTok はAPIで削除できないため、手動削除が必要です。')
+        : 'このジョブを削除しますか？\n\nこの動画へのコメントは行われません。';
+
+      if (!confirm(message)) return;
+      b.disabled = true;
+      try {
+        // Posted comments go through unpost so the real comment is removed,
+        // not just our record of it.
+        const r = posted
+          ? await api(`/jobs/${id}/unpost`, { method: 'POST' })
+          : await api(`/jobs/${id}`, { method: 'DELETE' });
+        if (r.note) alert(r.note);
+        await loadJobs();
+        loadStatus();
+      } catch (e) {
+        alert(e.message);
+        b.disabled = false;
+      }
+    }),
+  );
 }
 
 $('#btn-refresh-jobs').addEventListener('click', loadJobs);
+
+$('#btn-unpost-all').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  if (
+    !confirm(
+      '⚠️ 投稿済みのコメントを実際に削除します\n\n' +
+        'YouTube に書き込まれたコメントを API 経由で削除します。\n' +
+        'この操作は取り消せません。\n\n' +
+        '実行しますか？',
+    )
+  ) {
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '削除中…';
+  try {
+    const r = await api('/jobs/unpost-all', { method: 'POST' });
+    let msg = `YouTube から ${r.deleted} 件のコメントを削除しました。`;
+    if (r.failed.length) msg += `\n\n削除に失敗:\n${r.failed.join('\n')}`;
+    if (r.manual.length) {
+      msg += `\n\n⚠️ TikTok は手動削除が必要です:\n${r.manual.join('\n')}`;
+    }
+    alert(msg);
+    await loadJobs();
+    loadStatus();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '投稿済みのコメントを削除（取り消し）';
+  }
+});
+
+$('#btn-clear-unfinished').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  if (
+    !confirm(
+      '未完了のジョブをまとめて削除します。\n\n' +
+        '対象: 待機中 / コメント中 / ピン留め中 / 手動対応が必要 / 失敗\n' +
+        '完了済みの履歴は残ります。\n\n' +
+        '削除した動画にはコメントされません。よろしいですか？',
+    )
+  ) {
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const r = await api('/jobs/bulk-delete', {
+      method: 'POST',
+      body: { statuses: ['pending', 'commenting', 'pinning', 'needs_manual', 'failed'] },
+    });
+    alert(`${r.deleted} 件のジョブを削除しました。`);
+    await loadJobs();
+    loadStatus();
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 /* ---------------------------------- logs ---------------------------------- */
 

@@ -8,8 +8,11 @@ import {
   createTemplate,
   deleteAccount,
   deleteBrowserSession,
+  deleteJob,
+  deleteJobsByStatus,
   deleteTemplate,
   getAccount,
+  getJob,
   getSetting,
   jobStats,
   listJobs,
@@ -19,6 +22,7 @@ import {
   updateTemplate,
 } from '../../db/repo.js';
 import { errMessage } from '../../logger.js';
+import { deleteComment } from '../../platforms/youtube/api.js';
 import { subscribe, subscriptionState } from '../../platforms/youtube/websub.js';
 import { pollAll } from '../../scheduler.js';
 import {
@@ -251,6 +255,87 @@ apiRouter.post(
   handle(async (req) => {
     await requeueJob(Number(req.params.id));
     return { ok: true };
+  }),
+);
+
+apiRouter.delete(
+  '/jobs/:id',
+  handle(async (req) => {
+    const deleted = await deleteJob(Number(req.params.id));
+    if (!deleted) throw new Error('ジョブが見つかりません');
+    return { ok: true };
+  }),
+);
+
+/**
+ * Undo: deletes the comment from YouTube itself, not just our record of it.
+ * TikTok has no comment-delete API, so those have to be removed by hand and
+ * we say so rather than pretending it worked.
+ */
+apiRouter.post(
+  '/jobs/:id/unpost',
+  handle(async (req) => {
+    const job = await getJob(Number(req.params.id));
+    if (!job) throw new Error('ジョブが見つかりません');
+
+    if (!job.commentDone) {
+      await deleteJob(job.id);
+      return { ok: true, note: 'まだ投稿されていないジョブだったため、削除しました。' };
+    }
+
+    if (job.platform !== 'youtube' || !job.commentId) {
+      throw new Error(
+        'TikTok のコメントはAPIで削除できません。TikTokアプリ/サイトから手動で削除してください。',
+      );
+    }
+
+    await deleteComment(job.commentId);
+    await deleteJob(job.id);
+    return { ok: true, note: 'YouTube からコメントを削除しました。' };
+  }),
+);
+
+/** Bulk version of the above, for cleaning up a run that shouldn't have happened. */
+apiRouter.post(
+  '/jobs/unpost-all',
+  handle(async () => {
+    const jobs = await listJobs(200);
+    const targets = jobs.filter((j) => j.commentDone && j.platform === 'youtube' && j.commentId);
+
+    const result = { deleted: 0, failed: [] as string[], manual: [] as string[] };
+
+    for (const job of targets) {
+      try {
+        await deleteComment(job.commentId!);
+        await deleteJob(job.id);
+        result.deleted++;
+      } catch (e) {
+        result.failed.push(`${job.video.title}: ${errMessage(e)}`);
+      }
+    }
+
+    // Anything posted on TikTok went through the browser, and there is no API
+    // to take it back down.
+    for (const job of jobs.filter((j) => j.commentDone && j.platform === 'tiktok')) {
+      result.manual.push(job.video.url);
+    }
+
+    return result;
+  }),
+);
+
+/**
+ * Bulk cancel. Restricted to statuses that represent unfinished work —
+ * clearing 'done' would lose the record of what was actually posted.
+ */
+apiRouter.post(
+  '/jobs/bulk-delete',
+  handle(async (req) => {
+    const input = z
+      .object({ statuses: z.array(z.enum(['pending', 'commenting', 'pinning', 'needs_manual', 'failed'])).min(1) })
+      .parse(req.body);
+    const deleted = await deleteJobsByStatus(input.statuses);
+    return { ok: true, deleted };
   }),
 );
 

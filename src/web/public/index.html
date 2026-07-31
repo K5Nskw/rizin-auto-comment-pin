@@ -166,6 +166,23 @@
       <h3>投稿履歴</h3>
       <button id="btn-refresh-jobs" class="btn btn-ghost">更新</button>
     </div>
+
+    <div class="notice">
+      <strong>🛑 投稿を止める・取り消す</strong>
+      <p style="margin:8px 0">
+        <strong>未投稿のキューを消す</strong>：まだ投稿されていないジョブを削除します。実際の投稿には影響しません。<br>
+        <strong>投稿済みのコメントを削除</strong>：YouTube に実際に書き込まれたコメントを削除します。
+        <span style="color:var(--warn)">TikTok は削除APIが無いため手動対応が必要です（対象URLを表示します）。</span>
+      </p>
+      <div class="row">
+        <button id="btn-clear-unfinished" class="btn btn-ghost">未投稿のキューを消す</button>
+        <button id="btn-unpost-all" class="btn btn-danger">投稿済みのコメントを削除（取り消し）</button>
+      </div>
+      <p class="hint" style="margin:10px 0 0">
+        今後の自動投稿を止めるには、Railway の環境変数に <code>DRY_RUN=true</code> を設定するか、
+        「アカウント連携」タブで連携を解除してください。
+      </p>
+    </div>
     <div id="jobs-table"></div>
   </section>
 

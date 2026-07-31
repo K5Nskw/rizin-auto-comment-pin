@@ -80,6 +80,15 @@ export async function insertTopLevelComment(videoId: string, text: string): Prom
   return id;
 }
 
+/**
+ * Removes a comment we posted. Deleting your own comment is permitted with the
+ * force-ssl scope, so this is the undo for an unwanted automatic comment.
+ */
+export async function deleteComment(commentId: string): Promise<void> {
+  await call('/comments', { method: 'DELETE', query: { id: commentId } });
+  log.info('comment deleted', { commentId });
+}
+
 export interface UploadItem {
   videoId: string;
   title: string;

@@ -299,6 +299,22 @@ export async function updateJob(
   await query(`UPDATE jobs SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, values);
 }
 
+/**
+ * Cancels queued work. The `videos` row is deliberately kept: it is what
+ * stops the watchers from detecting the same upload again and re-queueing
+ * the job we were just asked to remove.
+ */
+export async function deleteJob(id: number): Promise<boolean> {
+  const rows = await query('DELETE FROM jobs WHERE id = $1 RETURNING id', [id]);
+  return rows.length > 0;
+}
+
+export async function deleteJobsByStatus(statuses: JobStatus[]): Promise<number> {
+  if (!statuses.length) return 0;
+  const rows = await query('DELETE FROM jobs WHERE status = ANY($1::text[]) RETURNING id', [statuses]);
+  return rows.length;
+}
+
 export async function listJobs(limit = 50): Promise<JobWithVideo[]> {
   const rows = await query(
     `SELECT j.*, row_to_json(v) AS video_json
