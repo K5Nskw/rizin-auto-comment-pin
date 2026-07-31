@@ -8,8 +8,51 @@
 
 ## 1-2. Postgres を追加する
 
-1. プロジェクト画面で **New** → **Database** → **Add PostgreSQL**
-2. 追加すると `DATABASE_URL` がアプリ側に自動で注入されます（手動設定不要）
+Postgres は**データを保存しておく場所（データベース）**です。
+このツールは、アカウント連携の認証情報・コメントのテンプレート・投稿済みかどうかの記録を
+覚えておく必要があります。アプリ本体は再デプロイのたびに中身がリセットされるため、
+これらを保存しておく場所が別に必要になります。
+
+### 追加する
+
+1. プロジェクト画面（サービスがカードで並んでいる画面）を開く
+2. 右上の **＋ Create**（または **New**）をクリック
+3. **Database** を選ぶ
+4. **Add PostgreSQL** を選ぶ
+
+30秒ほどで `Postgres` という名前のカードがプロジェクトに追加されます。
+
+### アプリと接続する ← ここが必要です
+
+**Postgres を追加しただけではアプリとつながりません。** アプリ側に接続先を教える必要があります。
+
+1. **アプリのサービス**（Postgres ではなく、GitHubから作った方）をクリック
+2. **Variables** タブを開く
+3. `DATABASE_URL` があるか確認する
+4. **無ければ** 新しい変数を追加する:
+
+   | Name | Value |
+   |---|---|
+   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+
+   この `${{Postgres.DATABASE_URL}}` は「Postgres サービスの DATABASE_URL を参照する」
+   という意味の Railway の記法です。この文字列をそのまま貼り付けてください
+   （実際の接続先URLは Railway が自動で埋めます）。
+
+   > Postgres サービスの名前を変更している場合は、`Postgres` の部分をその名前に置き換えてください。
+
+5. 保存すると自動で再デプロイされます
+
+### 確認する
+
+デプロイ後、`https://<発行されたURL>/healthz` をブラウザで開いてください。
+
+```json
+{"ok":true,"db":"ready"}
+```
+
+`"db":"ready"` になっていれば接続成功です。
+`"db":"error"` の場合は `dbError` に原因が書かれています。
 
 > Postgres には OAuth のトークンと Cookie が保存されます。
 > ここが消えると再連携が必要になるので、削除しないでください。
@@ -42,6 +85,14 @@
 |---|---|
 | `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` | [docs/SETUP-YOUTUBE.md](SETUP-YOUTUBE.md) |
 | `TIKTOK_CLIENT_KEY` / `TIKTOK_CLIENT_SECRET` | [docs/SETUP-TIKTOK.md](SETUP-TIKTOK.md) |
+| `LEGAL_ORG_NAME` / `LEGAL_CONTACT_EMAIL` | 自社の名称と連絡先（`/privacy` と `/terms` に表示されます） |
+
+### 設定しなくてよいもの
+
+| 変数 | 説明 |
+|---|---|
+| `YOUTUBE_CHANNEL_ID` | **通常は不要です。** 連携したアカウントのチャンネルIDを自動で取得します。連携したアカウントとは別のチャンネルを監視したい場合にだけ設定してください |
+| `PORT` | Railway が自動で設定します |
 
 ### 任意
 
