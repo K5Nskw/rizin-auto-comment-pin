@@ -69,6 +69,64 @@ async function findOwnComment(page: AnyPage, commentText: string): Promise<AnyLo
   throw new Error('投稿したコメントが画面上に見つかりませんでした（反映待ち、またはログイン中のアカウントが違う可能性）');
 }
 
+/**
+ * Opens a comment's "⋮" menu.
+ *
+ * YouTube keeps that button behind a `hidden` attribute and only drops it when
+ * the comment is hovered. A synthetic hover doesn't reliably trigger that in a
+ * headless browser, and Playwright then refuses to click an invisible element
+ * — the click times out against a button that is right there in the DOM.
+ *
+ * So: hover first (the normal path), and if the button is still hidden, strip
+ * the attribute ourselves before clicking, with a direct DOM click as the last
+ * resort.
+ */
+async function openCommentMenu(page: AnyPage, thread: AnyLocator): Promise<void> {
+  await thread.scrollIntoViewIfNeeded();
+  await thread.hover();
+  await page.waitForTimeout(600);
+
+  const menuButton = thread
+    .locator(
+      '#action-menu #button, #action-menu button, ytd-menu-renderer #button, ' +
+        'ytd-menu-renderer button[aria-label], #action-menu yt-icon-button',
+    )
+    .first();
+
+  if (!(await menuButton.count())) {
+    throw new Error('コメントのメニュー(⋮)ボタンが見つかりませんでした');
+  }
+
+  const visible = await menuButton.isVisible().catch(() => false);
+  if (!visible) {
+    log.info('menu button still hidden after hover; revealing it directly');
+    await thread
+      .evaluate((root: any) => {
+        const menu = root.querySelector('#action-menu') ?? root;
+        menu.removeAttribute?.('hidden');
+        for (const el of menu.querySelectorAll('[hidden]')) el.removeAttribute('hidden');
+        for (const el of [menu, ...menu.querySelectorAll('*')] as any[]) {
+          if (el?.style) {
+            el.style.visibility = 'visible';
+            el.style.opacity = '1';
+          }
+        }
+      })
+      .catch(() => {});
+    await page.waitForTimeout(200);
+  }
+
+  try {
+    await menuButton.click({ timeout: 8000 });
+  } catch {
+    // Visibility heuristics can still disagree with reality; dispatch the
+    // click on the element itself rather than giving up.
+    log.info('normal click failed; dispatching a direct DOM click');
+    await menuButton.evaluate((el: any) => el.click());
+  }
+  await page.waitForTimeout(1000);
+}
+
 async function clickByLabel(page: AnyPage, scope: AnyLocator, labels: string[]): Promise<boolean> {
   for (const label of labels) {
     const item = scope.getByText(label, { exact: false }).first();
@@ -97,23 +155,22 @@ export async function pinComment(videoId: string, commentText: string): Promise<
     await scrollToComments(page);
 
     const thread = await findOwnComment(page, commentText);
-    await thread.scrollIntoViewIfNeeded();
-    await thread.hover();
-    await page.waitForTimeout(400);
-
-    const menuButton = thread
-      .locator('#action-menu button, ytd-menu-renderer button[aria-label], #action-menu yt-icon-button')
-      .first();
-    if (!(await menuButton.count())) {
-      throw new Error('コメントのメニュー(⋮)ボタンが見つかりませんでした');
-    }
-    await menuButton.click();
-    await page.waitForTimeout(800);
+    await openCommentMenu(page, thread);
 
     const dropdown = page.locator('tp-yt-iron-dropdown:visible, ytd-menu-popup-renderer:visible').last();
     const opened = await clickByLabel(page, dropdown.count() ? dropdown : page, PIN_LABELS);
     if (!opened) {
-      throw new Error('メニューに「固定」項目が見つかりませんでした（自分のチャンネルでログインしているか確認してください）');
+      // Report what the menu actually offered — without it, this failure gives
+      // no way to tell a renamed label from a menu that has no pin option
+      // because we're signed in as the wrong channel.
+      const items = await page
+        .locator('tp-yt-iron-dropdown:visible ytd-menu-service-item-renderer, ytd-menu-popup-renderer:visible ytd-menu-service-item-renderer')
+        .allInnerTexts()
+        .catch(() => [] as string[]);
+      throw new Error(
+        `メニューに「固定」項目が見つかりませんでした（自分のチャンネルでログインしているか確認してください）。` +
+          `実際のメニュー項目: ${items.length ? items.map((t: string) => t.trim()).join(' / ') : '取得できませんでした'}`,
+      );
     }
 
     // YouTube asks for confirmation before pinning.
