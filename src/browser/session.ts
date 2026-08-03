@@ -118,15 +118,31 @@ async function snapshot(platform: Platform, page: AnyPage, label: string): Promi
  * access, so a bad export (wrong site, wrong browser profile, partial copy)
  * is identified immediately instead of looking like an expired session.
  */
-const REQUIRED_COOKIES: Record<Platform, { any: string[]; label: string }> = {
+/**
+ * Grouped because YouTube needs a coherent set, not any one of them.
+ *
+ * __Secure-3PSID in particular is the third-party-context cookie: it looks like
+ * a session cookie and is not one for a first-party visit to youtube.com, so
+ * treating it as sufficient reports a signed-out export as fine.
+ */
+const REQUIRED_COOKIES: Record<Platform, { groups: Array<{ names: string[]; role: string }>; label: string }> = {
   youtube: {
-    any: ['SID', '__Secure-1PSID', '__Secure-3PSID', 'LOGIN_INFO'],
+    groups: [
+      { names: ['__Secure-1PSID', 'SID'], role: 'セッション本体' },
+      { names: ['SAPISID', '__Secure-1PAPISID'], role: 'リクエスト署名' },
+    ],
     label: 'youtube.com にログインした状態',
   },
   tiktok: {
-    any: ['sessionid', 'sessionid_ss', 'sid_tt'],
+    groups: [{ names: ['sessionid', 'sessionid_ss', 'sid_tt'], role: 'セッション' }],
     label: 'tiktok.com にログインした状態',
   },
+};
+
+/** Not required, but their absence usually means a partial export. */
+const HELPFUL_COOKIES: Record<Platform, string[]> = {
+  youtube: ['LOGIN_INFO', 'HSID', 'SSID', 'APISID', '__Secure-3PAPISID'],
+  tiktok: ['tt_csrf_token', 'ttwid'],
 };
 
 export interface CookieDiagnosis {
@@ -145,7 +161,11 @@ export async function diagnoseCookies(platform: Platform): Promise<CookieDiagnos
   const names = new Set(cookies.map((c) => c.name));
   const spec = REQUIRED_COOKIES[platform];
 
-  const found = spec.any.filter((n) => names.has(n));
+  const satisfied = spec.groups.filter((g) => g.names.some((n) => names.has(n)));
+  const missingGroups = spec.groups.filter((g) => !g.names.some((n) => names.has(n)));
+  const found = spec.groups.flatMap((g) => g.names.filter((n) => names.has(n)));
+  const missingHelpful = HELPFUL_COOKIES[platform].filter((n) => !names.has(n));
+
   const domains = [...new Set(cookies.map((c) => String(c.domain ?? '')))].filter(Boolean);
 
   const soon = Date.now() / 1000 + 7 * 86_400;
@@ -153,19 +173,24 @@ export async function diagnoseCookies(platform: Platform): Promise<CookieDiagnos
     .filter((c) => typeof c.expires === 'number' && c.expires > 0 && c.expires < soon)
     .map((c) => String(c.name));
 
+  const ok = missingGroups.length === 0;
+
   let message: string;
   if (!cookies.length) {
     message = 'Cookie が登録されていません。';
-  } else if (!found.length) {
+  } else if (!ok) {
     message =
-      `ログイン用の Cookie（${spec.any.join(' / ')}）が1つも含まれていません。` +
-      `${spec.label}で、そのサイトを開いたままエクスポートし直してください。` +
-      `（登録されているドメイン: ${domains.join(', ') || 'なし'}）`;
+      `Cookie ${cookies.length} 件。ただし必須の Cookie が不足しています → ` +
+      missingGroups.map((g) => `${g.role}（${g.names.join(' または ')}）`).join(' / ') +
+      `。${spec.label}で、拡張機能を使ってそのサイトの Cookie を全件エクスポートし直してください。` +
+      `（登録済み: ${found.join(', ') || 'なし'} / ドメイン: ${domains.join(', ') || 'なし'}）`;
   } else {
-    message = `Cookie ${cookies.length} 件。ログイン用 Cookie（${found.join(', ')}）を確認しました。`;
+    message =
+      `Cookie ${cookies.length} 件。必須 Cookie（${found.join(', ')}）を確認しました。` +
+      (missingHelpful.length ? ` 未登録: ${missingHelpful.join(', ')}` : '');
   }
 
-  return { ok: found.length > 0, total: cookies.length, found, domains, expiringSoon, message };
+  return { ok, total: cookies.length, found, domains, expiringSoon, message };
 }
 
 /**
@@ -196,32 +221,43 @@ export async function checkLogin(
     const signals: string[] = [];
     let loggedIn = false;
 
+    // The platform's own flag is authoritative. A DOM signal may only
+    // corroborate it, never override it: ytd-topbar-menu-button-renderer is
+    // present when signed out too, and treating that as proof of login
+    // reported working sessions for ones that were not.
     if (platform === 'youtube') {
-      if (/"LOGGED_IN":\s*true/.test(html)) {
+      const flag = html.match(/"LOGGED_IN":\s*(\w+)/)?.[1];
+      const avatar = await page.locator('#avatar-btn, button#avatar-btn').count().catch(() => 0);
+
+      if (flag === 'true') {
         loggedIn = true;
         signals.push('ytcfg: LOGGED_IN=true');
-      } else if (/"LOGGED_IN":\s*false/.test(html)) {
+      } else if (flag === 'false') {
+        loggedIn = false;
         signals.push('ytcfg: LOGGED_IN=false（YouTube 側でログアウト扱い）');
+      } else {
+        loggedIn = avatar > 0;
+        signals.push('ytcfg: LOGGED_IN を判定できず、アバターの有無で代替判定');
       }
-      const avatar = await page
-        .locator('#avatar-btn, button#avatar-btn, ytd-topbar-menu-button-renderer')
-        .count();
-      if (avatar > 0) {
-        loggedIn = true;
-        signals.push(`アバターボタン: ${avatar}件`);
-      }
+      signals.push(`アバターボタン: ${avatar}件`);
     } else {
-      if (/"isLogin":\s*true/.test(html)) {
+      const flag = html.match(/"isLogin":\s*(\w+)/)?.[1];
+      const profile = await page
+        .locator('[data-e2e="profile-icon"], [data-e2e="nav-profile"]')
+        .count()
+        .catch(() => 0);
+
+      if (flag === 'true') {
         loggedIn = true;
         signals.push('app-context: isLogin=true');
-      } else if (/"isLogin":\s*false/.test(html)) {
+      } else if (flag === 'false') {
+        loggedIn = false;
         signals.push('app-context: isLogin=false（TikTok 側でログアウト扱い）');
+      } else {
+        loggedIn = profile > 0;
+        signals.push('app-context: isLogin を判定できず、アイコンの有無で代替判定');
       }
-      const profile = await page.locator('[data-e2e="profile-icon"], [data-e2e="nav-profile"]').count();
-      if (profile > 0) {
-        loggedIn = true;
-        signals.push(`プロフィールアイコン: ${profile}件`);
-      }
+      signals.push(`プロフィールアイコン: ${profile}件`);
     }
 
     signals.push(`到達URL: ${page.url()}`);
@@ -260,6 +296,25 @@ export function normaliseStorageState(input: unknown, domainHint: string): unkno
   }
 
   throw new Error('Cookie の形式が認識できません。storageState JSON か Cookie 配列を貼り付けてください。');
+}
+
+/**
+ * Combines a new export with what is already stored, keyed by name+domain+path
+ * so the newer value wins for the same cookie.
+ *
+ * YouTube's login spans .youtube.com and .google.com, and a browser extension
+ * exports one site at a time — replacing on every paste made it impossible to
+ * hold both halves at once.
+ */
+export function mergeStorageState(existing: unknown, incoming: unknown): unknown {
+  const pick = (s: any): any[] => (s && Array.isArray(s.cookies) ? s.cookies : []);
+  const merged = new Map<string, any>();
+
+  for (const c of pick(existing)) merged.set(`${c.name}|${c.domain}|${c.path}`, c);
+  for (const c of pick(incoming)) merged.set(`${c.name}|${c.domain}|${c.path}`, c);
+
+  const origins = [...pick(null), ...((existing as any)?.origins ?? []), ...((incoming as any)?.origins ?? [])];
+  return { cookies: [...merged.values()], origins };
 }
 
 function normaliseSameSite(v: unknown): 'Strict' | 'Lax' | 'None' {

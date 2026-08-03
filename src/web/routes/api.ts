@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { bootState, describeDbError } from '../../bootState.js';
-import { browserAvailable, checkLogin, diagnoseCookies, normaliseStorageState } from '../../browser/session.js';
+import {
+  browserAvailable,
+  checkLogin,
+  diagnoseCookies,
+  mergeStorageState,
+  normaliseStorageState,
+} from '../../browser/session.js';
 import { config, configWarnings, legalUrls } from '../../config.js';
 import {
   browserSessionInfo,
@@ -13,6 +19,7 @@ import {
   deleteTemplate,
   type Exclusion,
   getAccount,
+  getBrowserSession,
   getExclusions,
   getJob,
   getPlaylists,
@@ -557,7 +564,9 @@ apiRouter.post(
   '/browser/:platform/session',
   handle(async (req) => {
     const platform = platformSchema.parse(req.params.platform) as Platform;
-    const raw = z.object({ cookies: z.string().min(2) }).parse(req.body);
+    const raw = z
+      .object({ cookies: z.string().min(2), merge: z.boolean().default(false) })
+      .parse(req.body);
 
     let parsed: unknown;
     try {
@@ -567,11 +576,18 @@ apiRouter.post(
     }
 
     const domain = platform === 'youtube' ? '.youtube.com' : '.tiktok.com';
-    const state = normaliseStorageState(parsed, domain);
+    let state = normaliseStorageState(parsed, domain);
+
+    // Merging lets youtube.com and google.com exports coexist; a browser
+    // extension only ever exports one site at a time.
+    if (raw.merge) {
+      state = mergeStorageState(await getBrowserSession(platform), state);
+    }
+
     await saveBrowserSession(platform, state);
 
     const cookieCount = (state as { cookies?: unknown[] }).cookies?.length ?? 0;
-    return { ok: true, cookieCount };
+    return { ok: true, cookieCount, diagnosis: await diagnoseCookies(platform) };
   }),
 );
 

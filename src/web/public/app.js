@@ -861,12 +861,17 @@ $$('[data-save-session]').forEach((btn) =>
     const p = btn.dataset.saveSession;
     const msg = $(`#session-msg-${p}`);
     try {
+      const merge = $(`[data-merge="${p}"]`)?.checked ?? false;
       const r = await api(`/browser/${p}/session`, {
         method: 'POST',
-        body: { cookies: $(`#cookies-${p}`).value },
+        body: { cookies: $(`#cookies-${p}`).value, merge },
       });
       $(`#cookies-${p}`).value = '';
-      message(msg, `保存しました（Cookie ${r.cookieCount} 件）。「ログイン確認」で動作を確認してください。`, 'ok');
+      const d = r.diagnosis;
+      msg.innerHTML =
+        `保存しました（Cookie ${r.cookieCount} 件${merge ? '・追記' : ''}）<br>` +
+        `<span class="${d && d.ok ? 'ok' : 'err'}">${esc(d ? d.message : '')}</span>`;
+      msg.className = 'form-message';
       loadStatus();
     } catch (err) {
       message(msg, err.message, 'err');
