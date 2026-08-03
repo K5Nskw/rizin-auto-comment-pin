@@ -96,7 +96,7 @@ async function processYouTube(job: JobWithVideo): Promise<void> {
 
   // Give YouTube a moment to make the fresh comment visible in the UI.
   await new Promise((r) => setTimeout(r, 5000));
-  await pinComment(job.video.videoId, job.commentText);
+  await pinComment(job.video.videoId, job.commentText, job.commentId ?? undefined);
   await updateJob(job.id, { pinDone: true, lastError: null });
   job.pinDone = true;
   await finish(job);

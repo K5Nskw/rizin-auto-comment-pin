@@ -41,6 +41,27 @@ async function scrollToComments(page: AnyPage): Promise<void> {
   throw new Error('コメント欄を読み込めませんでした（コメントが無効、または動画が非公開の可能性）');
 }
 
+/**
+ * Locates the comment by its API-issued id.
+ *
+ * Every comment's timestamp links to ?lc=<id>, so this identifies the exact
+ * comment instead of inferring it from matching text — which could match
+ * someone who copied our pinned comment, and depends on sort order and how far
+ * down the list it landed.
+ */
+async function findCommentById(page: AnyPage, commentId: string): Promise<AnyLocator | null> {
+  const selector = `ytd-comment-thread-renderer:has(a[href*="lc=${commentId}"])`;
+  const deadline = Date.now() + 20_000;
+
+  while (Date.now() < deadline) {
+    const match = page.locator(selector).first();
+    if (await match.count().catch(() => 0)) return match;
+    await page.mouse.wheel(0, 600);
+    await page.waitForTimeout(1500);
+  }
+  return null;
+}
+
 async function findOwnComment(page: AnyPage, commentText: string): Promise<AnyLocator> {
   const needle = fingerprint(commentText);
   const deadline = Date.now() + 45_000;
@@ -317,10 +338,19 @@ async function clickByLabel(page: AnyPage, scope: AnyLocator, labels: string[]):
  * may need updating if YouTube changes it — failures are reported with the
  * exact step that broke, plus a screenshot in the admin UI.
  */
-export async function pinComment(videoId: string, commentText: string): Promise<void> {
+export async function pinComment(
+  videoId: string,
+  commentText: string,
+  commentId?: string,
+): Promise<void> {
   await withContext('youtube', async (page: AnyPage) => {
-    await page.goto(`https://www.youtube.com/watch?v=${videoId}`, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
+    // ?lc=<id> surfaces that specific comment at the top of the section, so the
+    // right one is on screen immediately instead of being hunted for by text.
+    const url = commentId
+      ? `https://www.youtube.com/watch?v=${videoId}&lc=${encodeURIComponent(commentId)}`
+      : `https://www.youtube.com/watch?v=${videoId}`;
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2500);
     await dismissConsent(page);
 
     // Checked before touching the menu: pin/edit/delete only exist for the
@@ -340,7 +370,24 @@ export async function pinComment(videoId: string, commentText: string): Promise<
 
     await scrollToComments(page);
 
-    const thread = await findOwnComment(page, commentText);
+    // Identity first, text only as a fallback.
+    let thread: AnyLocator | null = commentId ? await findCommentById(page, commentId) : null;
+    if (thread) {
+      log.info(`comment located by id ${commentId}`);
+    } else {
+      if (commentId) log.warn(`comment id ${commentId} not found on the page; falling back to text match`);
+      thread = await findOwnComment(page, commentText);
+
+      // Only meaningful for the text fallback: an id match is already proof of
+      // identity, whereas matching text could have found someone else's copy.
+      const uploaderBadge = await thread
+        .locator('[author-is-uploader], ytd-comment-view-model[author-is-uploader]')
+        .count()
+        .catch(() => 0);
+      if (!uploaderBadge) {
+        log.warn('matched by text and the comment carries no author badge; it may not be ours');
+      }
+    }
     await openCommentMenu(page, thread);
 
     const pin = await clickMenuItem(page, PIN_LABELS);
