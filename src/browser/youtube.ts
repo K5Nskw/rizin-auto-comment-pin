@@ -82,7 +82,16 @@ async function findOwnComment(page: AnyPage, commentText: string): Promise<AnyLo
  * resort.
  */
 async function openCommentMenu(page: AnyPage, thread: AnyLocator): Promise<void> {
-  await thread.scrollIntoViewIfNeeded();
+  // Centre it rather than scrollIntoViewIfNeeded(): that only guarantees the
+  // element is inside the viewport, which frequently parks it at the top edge
+  // underneath YouTube's sticky masthead. Pointer events at those coordinates
+  // land on the header, so hovering and clicking silently do nothing.
+  await thread
+    .evaluate((el: any) => el.scrollIntoView({ block: 'center', inline: 'nearest' }))
+    .catch(async () => {
+      await thread.scrollIntoViewIfNeeded().catch(() => {});
+    });
+  await page.waitForTimeout(500);
 
   // A real pointer move, not just locator.hover(): YouTube reveals the button
   // from mouseover on the comment, and moving the actual mouse is the closest
@@ -155,10 +164,52 @@ async function openCommentMenu(page: AnyPage, thread: AnyLocator): Promise<void>
   }
 
   if (!clicked) {
-    throw new Error(
-      'コメントのメニューを開けませんでした（⋮ ボタンは見つかりましたが、クリックしてもメニューが表示されません）',
-    );
+    throw new Error(`コメントのメニューを開けませんでした。${await describeMenuState(page, thread)}`);
   }
+}
+
+/**
+ * Collects the facts that distinguish the ways this step can fail: a signed-out
+ * session, a comment scrolled under the sticky masthead, a zero-sized button,
+ * or a menu that opened somewhere this code isn't looking.
+ */
+async function describeMenuState(page: AnyPage, thread: AnyLocator): Promise<string> {
+  const facts: string[] = [];
+
+  try {
+    const html: string = await page.content();
+    const m = html.match(/"LOGGED_IN":\s*(\w+)/);
+    facts.push(`ログイン状態=${m?.[1] ?? '不明'}`);
+  } catch {
+    facts.push('ログイン状態=取得失敗');
+  }
+
+  const box = await thread.boundingBox().catch(() => null);
+  facts.push(box ? `コメント位置 y=${Math.round(box.y)} 高さ=${Math.round(box.height)}` : 'コメント位置=取得不可');
+  if (box && box.y < 60) facts.push('※ヘッダーの裏に隠れている可能性');
+
+  const detail = await thread
+    .locator('#action-menu #button, #action-menu button, ytd-menu-renderer #button')
+    .first()
+    .evaluate((el: any) => {
+      const cs = el.ownerDocument.defaultView.getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return `hidden=${el.hasAttribute('hidden')} display=${cs.display} visibility=${cs.visibility} opacity=${cs.opacity} size=${Math.round(r.width)}x${Math.round(r.height)}`;
+    })
+    .catch(() => '取得失敗');
+  facts.push(`⋮ボタン: ${detail}`);
+
+  const dropdowns = await page.locator('tp-yt-iron-dropdown').count().catch(() => 0);
+  const visibleDropdowns = await page.locator('tp-yt-iron-dropdown:visible').count().catch(() => 0);
+  facts.push(`ドロップダウン: 全${dropdowns}件 / 表示中${visibleDropdowns}件`);
+
+  const isUploader = await thread
+    .locator('[author-is-uploader], ytd-comment-view-model[author-is-uploader]')
+    .count()
+    .catch(() => 0);
+  facts.push(`投稿者バッジ=${isUploader > 0 ? 'あり' : 'なし'}`);
+
+  return facts.join(' / ');
 }
 
 /**
@@ -271,6 +322,22 @@ export async function pinComment(videoId: string, commentText: string): Promise<
     await page.goto(`https://www.youtube.com/watch?v=${videoId}`, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
     await dismissConsent(page);
+
+    // Checked before touching the menu: pin/edit/delete only exist for the
+    // comment's author, so a signed-out session leaves the "⋮" permanently
+    // hidden and every click on it does nothing. Without this the failure
+    // reads as a selector problem instead of an expired login.
+    const html: string = await page.content();
+    if (/"LOGGED_IN":\s*false/.test(html)) {
+      throw new Error(
+        'ブラウザセッションがログインしていません（YouTube 側で LOGGED_IN=false）。' +
+          '「アカウント連携」タブで Cookie を登録し直してください。',
+      );
+    }
+    if (!/"LOGGED_IN":\s*true/.test(html)) {
+      log.warn('LOGGED_IN フラグを判定できませんでした。ログイン状態が不明なまま続行します');
+    }
+
     await scrollToComments(page);
 
     const thread = await findOwnComment(page, commentText);
