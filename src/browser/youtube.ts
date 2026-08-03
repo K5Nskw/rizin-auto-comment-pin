@@ -161,26 +161,33 @@ async function openCommentMenu(page: AnyPage, thread: AnyLocator): Promise<void>
   }
 }
 
-/** Menu items render at the document root, not inside the comment. */
-const MENU_ITEM_SELECTOR = [
-  'ytd-menu-service-item-renderer',
-  'ytd-menu-navigation-item-renderer',
-  'yt-list-item-view-model',
-  'tp-yt-paper-listbox tp-yt-paper-item',
+/**
+ * The open menu renders at the document root inside a tp-yt-iron-dropdown.
+ *
+ * Scoping to that visible dropdown matters: YouTube keeps many hidden
+ * ytd-menu-*-item-renderer elements elsewhere in the page, and a page-wide
+ * query picks one of those instead — which is what made an open menu look
+ * closed, so the code clicked again and toggled it shut.
+ */
+const OPEN_MENU_ITEMS = [
+  'tp-yt-iron-dropdown:visible ytd-menu-navigation-item-renderer',
+  'tp-yt-iron-dropdown:visible ytd-menu-service-item-renderer',
+  'ytd-menu-popup-renderer:visible ytd-menu-navigation-item-renderer',
+  'ytd-menu-popup-renderer:visible ytd-menu-service-item-renderer',
 ].join(', ');
 
 async function menuIsOpen(page: AnyPage, timeout: number): Promise<boolean> {
-  try {
-    await page.locator(MENU_ITEM_SELECTOR).first().waitFor({ state: 'visible', timeout });
-    return true;
-  } catch {
-    return false;
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if ((await page.locator(OPEN_MENU_ITEMS).count().catch(() => 0)) > 0) return true;
+    await page.waitForTimeout(250);
   }
+  return false;
 }
 
-/** Clicks the menu entry whose text contains one of `labels`. */
+/** Clicks the entry of the open menu whose text contains one of `labels`. */
 async function clickMenuItem(page: AnyPage, labels: string[]): Promise<{ ok: boolean; items: string[] }> {
-  const all = page.locator(MENU_ITEM_SELECTOR);
+  const all = page.locator(OPEN_MENU_ITEMS);
   const count = await all.count().catch(() => 0);
   const items: string[] = [];
 
@@ -193,11 +200,50 @@ async function clickMenuItem(page: AnyPage, labels: string[]): Promise<{ ok: boo
       await item.click({ timeout: 5000 }).catch(async () => {
         await item.evaluate((el: any) => el.click());
       });
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(1000);
       return { ok: true, items };
     }
   }
   return { ok: false, items };
+}
+
+/**
+ * Confirms the "pin this comment?" dialog when YouTube shows one.
+ *
+ * Absence of the dialog is not an error — YouTube doesn't always ask — so this
+ * only reports a problem when a dialog is present and cannot be confirmed.
+ */
+async function confirmPinDialog(page: AnyPage): Promise<void> {
+  const dialog = page
+    .locator('yt-confirm-dialog-renderer:visible, tp-yt-paper-dialog:visible, ytd-popup-container tp-yt-paper-dialog:visible')
+    .last();
+
+  // Give it a moment to appear; no dialog at all is a valid outcome.
+  const appeared = await dialog
+    .waitFor({ state: 'visible', timeout: 4000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!appeared) {
+    log.info('no confirmation dialog appeared');
+    return;
+  }
+
+  const confirmButton = dialog.locator('#confirm-button, #confirm-button button, yt-button-renderer#confirm-button').first();
+  if (await confirmButton.count().catch(() => 0)) {
+    await confirmButton.click({ timeout: 5000 }).catch(async () => {
+      await confirmButton.evaluate((el: any) => el.click());
+    });
+    await page.waitForTimeout(1500);
+    return;
+  }
+
+  if (await clickByLabel(page, dialog, CONFIRM_LABELS)) {
+    await page.waitForTimeout(1500);
+    return;
+  }
+
+  const text = (await dialog.innerText().catch(() => '')).trim().slice(0, 200);
+  throw new Error(`確認ダイアログの実行ボタンが見つかりませんでした。ダイアログの内容: ${text || '（取得できず）'}`);
 }
 
 async function clickByLabel(page: AnyPage, scope: AnyLocator, labels: string[]): Promise<boolean> {
@@ -240,17 +286,8 @@ export async function pinComment(videoId: string, commentText: string): Promise<
       );
     }
 
-    // YouTube asks for confirmation before pinning.
-    const dialog = page.locator('yt-confirm-dialog-renderer, tp-yt-paper-dialog:visible').last();
-    if (await dialog.count().catch(() => 0)) {
-      const confirmed = await clickByLabel(page, dialog, CONFIRM_LABELS);
-      if (!confirmed) {
-        const fallback = dialog.locator('#confirm-button button, #confirm-button').first();
-        if (await fallback.count()) await fallback.click();
-      }
-      await page.waitForTimeout(1500);
-    }
-
+    log.info(`menu items: ${pin.items.join(' / ')}`);
+    await confirmPinDialog(page);
     log.info(`pinned comment on ${videoId}`);
   });
 }
