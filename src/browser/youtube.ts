@@ -83,8 +83,18 @@ async function findOwnComment(page: AnyPage, commentText: string): Promise<AnyLo
  */
 async function openCommentMenu(page: AnyPage, thread: AnyLocator): Promise<void> {
   await thread.scrollIntoViewIfNeeded();
-  await thread.hover();
-  await page.waitForTimeout(600);
+
+  // A real pointer move, not just locator.hover(): YouTube reveals the button
+  // from mouseover on the comment, and moving the actual mouse is the closest
+  // thing to a user doing it.
+  const box = await thread.boundingBox().catch(() => null);
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + Math.min(30, box.height / 2));
+    await page.waitForTimeout(300);
+    await page.mouse.move(box.x + box.width / 2, box.y + Math.min(40, box.height / 2));
+  }
+  await thread.hover().catch(() => {});
+  await page.waitForTimeout(700);
 
   const menuButton = thread
     .locator(
@@ -116,15 +126,78 @@ async function openCommentMenu(page: AnyPage, thread: AnyLocator): Promise<void>
     await page.waitForTimeout(200);
   }
 
-  try {
-    await menuButton.click({ timeout: 8000 });
-  } catch {
-    // Visibility heuristics can still disagree with reality; dispatch the
-    // click on the element itself rather than giving up.
-    log.info('normal click failed; dispatching a direct DOM click');
-    await menuButton.evaluate((el: any) => el.click());
+  // Click at real coordinates where possible — a synthetic click on a Polymer
+  // component does not always run the same handler as a genuine pointer press.
+  const buttonBox = await menuButton.boundingBox().catch(() => null);
+  let clicked = false;
+
+  if (buttonBox) {
+    await page.mouse.move(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
+    await page.waitForTimeout(150);
+    await page.mouse.down();
+    await page.mouse.up();
+    clicked = await menuIsOpen(page, 3000);
   }
-  await page.waitForTimeout(1000);
+
+  if (!clicked) {
+    try {
+      await menuButton.click({ timeout: 5000, force: true });
+      clicked = await menuIsOpen(page, 3000);
+    } catch {
+      /* fall through to the DOM click */
+    }
+  }
+
+  if (!clicked) {
+    log.info('pointer clicks did not open the menu; dispatching a direct DOM click');
+    await menuButton.evaluate((el: any) => el.click()).catch(() => {});
+    clicked = await menuIsOpen(page, 4000);
+  }
+
+  if (!clicked) {
+    throw new Error(
+      'コメントのメニューを開けませんでした（⋮ ボタンは見つかりましたが、クリックしてもメニューが表示されません）',
+    );
+  }
+}
+
+/** Menu items render at the document root, not inside the comment. */
+const MENU_ITEM_SELECTOR = [
+  'ytd-menu-service-item-renderer',
+  'ytd-menu-navigation-item-renderer',
+  'yt-list-item-view-model',
+  'tp-yt-paper-listbox tp-yt-paper-item',
+].join(', ');
+
+async function menuIsOpen(page: AnyPage, timeout: number): Promise<boolean> {
+  try {
+    await page.locator(MENU_ITEM_SELECTOR).first().waitFor({ state: 'visible', timeout });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Clicks the menu entry whose text contains one of `labels`. */
+async function clickMenuItem(page: AnyPage, labels: string[]): Promise<{ ok: boolean; items: string[] }> {
+  const all = page.locator(MENU_ITEM_SELECTOR);
+  const count = await all.count().catch(() => 0);
+  const items: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const item = all.nth(i);
+    const text = (await item.innerText().catch(() => '')).trim();
+    if (!text) continue;
+    items.push(text);
+    if (labels.some((l) => text.includes(l))) {
+      await item.click({ timeout: 5000 }).catch(async () => {
+        await item.evaluate((el: any) => el.click());
+      });
+      await page.waitForTimeout(800);
+      return { ok: true, items };
+    }
+  }
+  return { ok: false, items };
 }
 
 async function clickByLabel(page: AnyPage, scope: AnyLocator, labels: string[]): Promise<boolean> {
@@ -157,19 +230,13 @@ export async function pinComment(videoId: string, commentText: string): Promise<
     const thread = await findOwnComment(page, commentText);
     await openCommentMenu(page, thread);
 
-    const dropdown = page.locator('tp-yt-iron-dropdown:visible, ytd-menu-popup-renderer:visible').last();
-    const opened = await clickByLabel(page, dropdown.count() ? dropdown : page, PIN_LABELS);
-    if (!opened) {
-      // Report what the menu actually offered — without it, this failure gives
-      // no way to tell a renamed label from a menu that has no pin option
-      // because we're signed in as the wrong channel.
-      const items = await page
-        .locator('tp-yt-iron-dropdown:visible ytd-menu-service-item-renderer, ytd-menu-popup-renderer:visible ytd-menu-service-item-renderer')
-        .allInnerTexts()
-        .catch(() => [] as string[]);
+    const pin = await clickMenuItem(page, PIN_LABELS);
+    if (!pin.ok) {
+      // The menu contents are the diagnosis: a renamed label and a menu with no
+      // pin option (wrong channel signed in) look identical without them.
       throw new Error(
         `メニューに「固定」項目が見つかりませんでした（自分のチャンネルでログインしているか確認してください）。` +
-          `実際のメニュー項目: ${items.length ? items.map((t: string) => t.trim()).join(' / ') : '取得できませんでした'}`,
+          `実際のメニュー項目: ${pin.items.length ? pin.items.join(' / ') : '（項目なし）'}`,
       );
     }
 
