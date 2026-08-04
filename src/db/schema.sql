@@ -100,3 +100,7 @@ ALTER TABLE videos ADD COLUMN IF NOT EXISTS source_start_sec INTEGER;
 -- and unlike them it works while the clip is still private.
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS set_related  BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS related_done BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- YouTube exposes no "is this a Short" field; this caches what /shorts/<id>
+-- answers. NULL means undetermined, which is not the same as false.
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_short BOOLEAN;

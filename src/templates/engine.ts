@@ -105,14 +105,32 @@ function matches(template: Template, video: Pick<DetectedVideo, 'title' | 'descr
   }
 }
 
+/**
+ * Whether a template's target covers this video.
+ *
+ * A Shorts-only template needs the video to be a known Short: when detection
+ * came back undetermined, applying it would be a guess, and guessing wrong
+ * means a Short-specific comment on a full-length video.
+ */
+function targets(
+  target: Template['platform'],
+  video: Pick<DetectedVideo, 'platform' | 'isShort'>,
+): boolean {
+  if (target === 'all') return true;
+  if (target === 'tiktok') return video.platform === 'tiktok';
+  if (target === 'youtube') return video.platform === 'youtube';
+  if (target === 'youtube_shorts') return video.platform === 'youtube' && video.isShort === true;
+  return false;
+}
+
 /** Lowest `priority` number wins; ties break on id order from the query. */
 export function selectTemplate(
   templates: Template[],
-  video: Pick<DetectedVideo, 'title' | 'description' | 'platform'>,
+  video: Pick<DetectedVideo, 'title' | 'description' | 'platform' | 'isShort'>,
 ): Template | null {
   const candidates = templates
     .filter((t) => t.enabled)
-    .filter((t) => t.platform === 'all' || t.platform === video.platform)
+    .filter((t) => targets(t.platform, video))
     .filter((t) => t.bodies.some((b) => b.trim().length > 0))
     .filter((t) => matches(t, video))
     .sort((a, b) => a.priority - b.priority || a.id - b.id);

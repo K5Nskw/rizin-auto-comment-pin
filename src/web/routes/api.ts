@@ -65,7 +65,7 @@ const platformSchema = z.enum(['youtube', 'tiktok']);
 
 const templateSchema = z.object({
   name: z.string().min(1, '名前を入力してください'),
-  platform: z.enum(['all', 'youtube', 'tiktok']),
+  platform: z.enum(['all', 'youtube', 'youtube_shorts', 'tiktok']),
   enabled: z.boolean(),
   priority: z.number().int().min(0).max(9999),
   matchType: z.enum(['always', 'keyword', 'regex']),
@@ -375,6 +375,7 @@ apiRouter.post(
       title: z.string().default('【RIZIN】試合ハイライト｜〇〇 vs 〇〇'),
       description: z.string().default(''),
       platform: platformSchema.default('youtube'),
+      isShort: z.boolean().default(false),
       body: z.string().optional(),
     });
     const input = schema.parse(req.body ?? {});
@@ -384,6 +385,7 @@ apiRouter.post(
       title: input.title,
       description: input.description,
       platform: input.platform,
+      isShort: input.isShort,
     });
 
     const account = await getAccount(input.platform);

@@ -150,6 +150,7 @@ function toVideo(row: Record<string, any>): VideoRecord {
     url: row.url,
     publishedAt: row.published_at,
     detectedAt: row.detected_at,
+    isShort: row.is_short ?? null,
     source: row.source_video_id
       ? {
           videoId: row.source_video_id,
@@ -168,8 +169,8 @@ export async function recordVideo(v: DetectedVideo): Promise<{ isNew: boolean; v
   const key = videoKey(v.platform, v.videoId);
   const inserted = await queryOne(
     `INSERT INTO videos (key, platform, video_id, title, description, url, published_at, raw,
-                         source_video_id, source_url, source_title, source_start_sec)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12)
+                         source_video_id, source_url, source_title, source_start_sec, is_short)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13)
      ON CONFLICT (key) DO NOTHING
      RETURNING *`,
     [
@@ -185,6 +186,7 @@ export async function recordVideo(v: DetectedVideo): Promise<{ isNew: boolean; v
       v.source?.url ?? null,
       v.source?.title ?? null,
       v.source?.startSec ?? null,
+      v.isShort ?? null,
     ],
   );
   if (inserted) return { isNew: true, video: toVideo(inserted) };

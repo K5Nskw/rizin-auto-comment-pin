@@ -19,10 +19,17 @@ export interface Account {
 
 export type MatchType = 'always' | 'keyword' | 'regex';
 
+/**
+ * What a template applies to. 'youtube' covers every YouTube upload including
+ * Shorts, so adding 'youtube_shorts' doesn't change what existing templates
+ * match; a Shorts-only template wins by having a smaller priority.
+ */
+export type TemplateTarget = 'all' | 'youtube' | 'youtube_shorts' | 'tiktok';
+
 export interface Template {
   id: number;
   name: string;
-  platform: Platform | 'all';
+  platform: TemplateTarget;
   enabled: boolean;
   priority: number;
   matchType: MatchType;
@@ -52,6 +59,8 @@ export interface VideoRecord {
   url: string;
   publishedAt: Date | null;
   detectedAt: Date;
+  /** Null when it could not be determined — not the same as "not a Short". */
+  isShort: boolean | null;
   /** Null for anything that didn't arrive through the clip hook. */
   source: ClipSource | null;
 }
@@ -94,4 +103,5 @@ export interface DetectedVideo {
   publishedAt: Date | null;
   raw?: unknown;
   source?: ClipSource;
+  isShort?: boolean | null;
 }

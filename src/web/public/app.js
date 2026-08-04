@@ -248,6 +248,22 @@ $('#btn-poll').addEventListener('click', async (e) => {
 
 /* -------------------------------- templates ------------------------------- */
 
+const MATCH_TYPES = ['always', 'keyword', 'regex'];
+
+const TARGET_LABELS = {
+  all: '両方',
+  youtube: 'YouTube（Shorts含む）',
+  youtube_shorts: 'YouTube Shorts のみ',
+  tiktok: 'TikTok',
+};
+
+function matchLabel(t) {
+  if (t.matchType === 'always') return 'すべての動画';
+  if (t.matchType === 'keyword') return `キーワード: ${esc(t.matchValue)}`;
+  if (t.matchType === 'regex') return '正規表現';
+  return `<span style="color:var(--err)">未対応の条件: ${esc(t.matchType)}</span>`;
+}
+
 let templates = [];
 let editingId = null;
 let lastFocusedBody = null;
@@ -267,8 +283,8 @@ async function loadTemplates() {
           <span class="badge badge-muted">優先度 ${t.priority}</span>
         </div>
         <div class="t-meta">
-          ${t.platform === 'all' ? '両方' : t.platform === 'youtube' ? 'YouTube' : 'TikTok'} ・
-          ${t.matchType === 'always' ? 'すべての動画' : t.matchType === 'keyword' ? `キーワード: ${esc(t.matchValue)}` : `正規表現`} ・
+          ${TARGET_LABELS[t.platform] || t.platform} ・
+          ${matchLabel(t)} ・
           ${t.pin ? 'ピン留めあり' : 'ピン留めなし'} ・ ${t.bodies.length} パターン
           ${t.enabled ? '' : '・<span class="badge badge-warn">無効</span>'}
         </div>
@@ -351,7 +367,21 @@ function openTemplate(id) {
   form.name.value = t.name;
   form.platform.value = t.platform;
   form.priority.value = t.priority;
-  form.matchType.value = t.matchType;
+  // A template saved by an older build can carry a condition this form has no
+  // option for. Assigning it leaves the select empty, which then fails
+  // validation on save with a message that says nothing useful — so fall back
+  // and say what happened instead.
+  if (MATCH_TYPES.includes(t.matchType)) {
+    form.matchType.value = t.matchType;
+  } else {
+    form.matchType.value = 'always';
+    message(
+      $('#form-message'),
+      `このテンプレートの条件「${t.matchType}」は現在サポートされていません。` +
+        `「すべての動画」に切り替えました。条件を選び直して保存するか、不要なら削除してください。`,
+      'err',
+    );
+  }
   form.matchValue.value = t.matchValue;
   form.enabled.checked = t.enabled;
   form.pin.checked = t.pin;
@@ -545,9 +575,13 @@ $('#btn-save-playlists').addEventListener('click', async () => {
 /* --------------------------------- preview -------------------------------- */
 
 async function runPreview() {
+  // The picker offers Shorts as its own entry; the API takes platform plus a
+  // flag, since a Short is still posted to YouTube.
+  const picked = $('#preview-platform').value;
   const body = {
     title: $('#preview-title').value,
-    platform: $('#preview-platform').value,
+    platform: picked === 'youtube_short' ? 'youtube' : picked,
+    isShort: picked === 'youtube_short',
   };
   // When the editor is open, preview exactly what's on screen (including
   // unsaved edits) instead of the stored template.

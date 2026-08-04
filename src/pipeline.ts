@@ -10,6 +10,7 @@ import {
   videoKey,
 } from './db/repo.js';
 import { resolvePlaylistVariables } from './platforms/youtube/playlists.js';
+import { detectShort } from './platforms/youtube/shorts.js';
 import { createLogger } from './logger.js';
 import { notify } from './notify/index.js';
 import { clampComment, pickBody, renderTemplate, selectTemplate } from './templates/engine.js';
@@ -56,6 +57,13 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
       created: false,
       reason: `除外リストに登録されているためコメントしません${excluded.note ? `（${excluded.note}）` : ''}`,
     };
+  }
+
+  // Resolved before the record is written so the answer is stored with it and
+  // template selection can rely on it. A clip from AutoClipMaker is a Short by
+  // construction, so that case needs no request.
+  if (v.platform === 'youtube' && v.isShort === undefined) {
+    v.isShort = v.source ? true : await detectShort(v.videoId);
   }
 
   const { isNew } = await recordVideo(v);
