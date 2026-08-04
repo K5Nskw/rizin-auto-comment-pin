@@ -6,6 +6,7 @@ import {
   checkLogin,
   diagnoseCookies,
   mergeStorageState,
+  refreshSession,
   normaliseStorageState,
 } from '../../browser/session.js';
 import { config, configWarnings, ingestUrl, legalUrls } from '../../config.js';
@@ -592,6 +593,24 @@ apiRouter.post(
 
     const cookieCount = (state as { cookies?: unknown[] }).cookies?.length ?? 0;
     return { ok: true, cookieCount, diagnosis: await diagnoseCookies(platform) };
+  }),
+);
+
+/**
+ * Cookie を使って1ページ読み込み、返ってきた新しい Cookie を保存し直す。
+ * 期限が近いだけのセッションは、これで延びることがある。
+ */
+apiRouter.post(
+  '/browser/:platform/refresh',
+  handle(async (req) => {
+    const platform = platformSchema.parse(req.params.platform) as Platform;
+    const ok = await refreshSession(platform);
+    return {
+      ok,
+      note: ok
+        ? 'セッションを更新しました。'
+        : 'セッションを更新できませんでした。ログイン確認を実行して、状態を確かめてください。',
+    };
   }),
 );
 

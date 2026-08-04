@@ -76,19 +76,85 @@ export async function withContext<T>(
 
     const page = await context.newPage();
     try {
-      const result = await fn(page, context);
-      // Persist refreshed cookies so the session doesn't expire prematurely.
-      await saveBrowserSession(platform, await context.storageState());
-      return result;
+      return await fn(page, context);
     } catch (e) {
       await captureFailure(platform, page).catch(() => {});
       throw e;
     } finally {
+      // Google rotates its session cookies (__Secure-1PSIDTS and friends) as
+      // the browser is used, and treats the ones it replaced as spent. Saving
+      // only after a successful run threw those replacements away whenever a
+      // step failed, so the next run replayed cookies the server had already
+      // moved past — which is what "the session keeps expiring" looks like.
+      // Keep whatever the browser ended up holding, success or not.
+      await persistSession(platform, context);
       await context.close().catch(() => {});
     }
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+/**
+ * Touches the session so its cookies stay in rotation.
+ *
+ * Google hands out replacement session cookies as the browser is used and
+ * expects the old ones to fall out of use. A session that sits untouched
+ * between uploads drifts out of that cycle and is eventually refused, which
+ * reads as "the cookies keep expiring" even though nobody logged out.
+ * Loading one page every few hours keeps them current, and `withContext`
+ * writes back whatever the browser ends up holding.
+ *
+ * Never throws: this runs on a timer, and a browser that cannot start is not
+ * a reason to take the scheduler's tick down.
+ */
+export async function refreshSession(platform: Platform): Promise<boolean> {
+  try {
+    if (!(await getBrowserSession(platform))) return false;
+    await withContext(platform, async (page: AnyPage) => {
+      const url = platform === 'youtube' ? 'https://www.youtube.com/' : 'https://www.tiktok.com/';
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+      // Long enough for the app to run its own token refresh before we save.
+      await page.waitForTimeout(5000);
+    });
+    log.info(`${platform}: セッションを更新しました`);
+    return true;
+  } catch (e) {
+    log.warn(`${platform}: セッションの更新に失敗しました: ${errMessage(e)}`);
+    return false;
+  }
+}
+
+/**
+ * Writes back the cookies the browser is holding now.
+ *
+ * Best effort on purpose: this runs on the failure path too, and a problem
+ * saving the session must not replace the error the caller is about to see.
+ */
+async function persistSession(platform: Platform, context: AnyContext): Promise<void> {
+  try {
+    const state = await context.storageState();
+    // A jar without the login cookies is not a session worth keeping: the run
+    // may have been bounced to a sign-in page, and writing that over a stored
+    // session would turn "rejected" into "never registered" and lose the
+    // evidence. An empty jar means the context never got going at all.
+    if (!hasRequiredCookies(platform, state)) {
+      log.warn(`${platform}: ログイン用の Cookie が残っていないため、保存済みのセッションを維持します`);
+      return;
+    }
+    await saveBrowserSession(platform, state);
+    await setSetting(`session_refreshed_at:${platform}`, new Date().toISOString());
+  } catch (e) {
+    log.warn(`${platform}: セッションの保存に失敗しました: ${errMessage(e)}`);
+  }
+}
+
+/** そのプラットフォームのログインに要る Cookie が揃っているか。 */
+function hasRequiredCookies(platform: Platform, state: unknown): boolean {
+  const cookies = (state as { cookies?: Array<{ name?: string }> } | null)?.cookies ?? [];
+  if (cookies.length === 0) return false;
+  const names = new Set(cookies.map((c) => String(c.name ?? '')));
+  return REQUIRED_COOKIES[platform].groups.every((g) => g.names.some((n) => names.has(n)));
 }
 
 /**

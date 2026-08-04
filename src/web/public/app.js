@@ -184,9 +184,13 @@ async function loadStatus() {
   );
 
   const b = s.browser;
+  // 最終更新も出す。Cookie は使われるたびに更新されるので、ここが古いままなら
+  // 「登録済みだが実際には通っていない」を疑える
   const sessionLine = (p, label) =>
     `<div class="line"><span>${label} Cookie</span><span>${
-      b.sessions[p] ? `<span class="badge badge-ok">登録済み</span>` : `<span class="badge badge-err">未登録</span>`
+      b.sessions[p]
+        ? `<span class="badge badge-ok">登録済み</span> <span class="hint">最終更新 ${esc(fmtDate(b.sessions[p]))}</span>`
+        : `<span class="badge badge-err">未登録</span>`
     }</span></div>`;
 
   $('#browser-status').innerHTML = `
@@ -945,6 +949,24 @@ $$('[data-check-session]').forEach((btn) =>
         `<span class="${r.loggedIn ? 'ok' : 'err'}">${esc(r.detail)}</span>` +
         (signals ? `<ul style="margin:6px 0 0;font-size:12px;color:var(--muted)">${signals}</ul>` : '');
       msg.className = 'form-message';
+    } catch (err) {
+      message(msg, err.message, 'err');
+    } finally {
+      btn.disabled = false;
+    }
+  }),
+);
+
+$$('[data-refresh-session]').forEach((btn) =>
+  btn.addEventListener('click', async () => {
+    const p = btn.dataset.refreshSession;
+    const msg = $(`#session-msg-${p}`);
+    message(msg, '更新中…（30秒ほどかかります）', 'ok');
+    btn.disabled = true;
+    try {
+      const r = await api(`/browser/${p}/refresh`, { method: 'POST' });
+      message(msg, r.note, r.ok ? 'ok' : 'err');
+      loadStatus();
     } catch (err) {
       message(msg, err.message, 'err');
     } finally {

@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { refreshSession } from './browser/session.js';
 import { pruneLogs } from './db/index.js';
 import { createLogger, errMessage } from './logger.js';
 import { pollTikTok } from './platforms/tiktok/watcher.js';
@@ -19,6 +20,11 @@ function every(ms: number, name: string, fn: () => Promise<unknown>) {
   return tick;
 }
 
+/** ログイン済みセッションを維持する。登録が無いプラットフォームは何もしない。 */
+export async function refreshSessions(): Promise<{ youtube: boolean; tiktok: boolean }> {
+  return { youtube: await refreshSession('youtube'), tiktok: await refreshSession('tiktok') };
+}
+
 export async function pollAll(): Promise<{ youtube: unknown; tiktok: unknown }> {
   const [youtube, tiktok] = await Promise.all([pollYouTube(), pollTikTok()]);
   return { youtube, tiktok };
@@ -30,6 +36,9 @@ export function startScheduler(): void {
   every(30_000, 'worker', runDueJobs);
   every(pollMs, 'poll', pollAll);
   every(6 * 3_600_000, 'websub-renew', ensureSubscription);
+  // Cookies that sit unused drift out of Google's rotation and stop being
+  // accepted. Touching them on a timer keeps a session alive between uploads.
+  every(4 * 3_600_000, 'session-refresh', refreshSessions);
   every(24 * 3_600_000, 'prune-logs', () => pruneLogs(30));
 
   log.info(`scheduler started (poll every ${config.POLL_INTERVAL_MINUTES}m, worker every 30s)`);
