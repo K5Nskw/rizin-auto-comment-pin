@@ -1,4 +1,4 @@
-import type { DetectedVideo, Platform, Template } from '../types.js';
+import type { ClipSource, DetectedVideo, Platform, Template } from '../types.js';
 
 export interface RenderContext {
   title: string;
@@ -9,6 +9,8 @@ export interface RenderContext {
   publishedAt: Date;
   /** Resolved playlist variables, keyed by their full token name. */
   extra?: Record<string, string>;
+  /** Only set for clips sent in from AutoClipMaker. */
+  source?: ClipSource;
 }
 
 /** Shown in the admin UI so the operator doesn't have to read the docs. */
@@ -24,6 +26,43 @@ export const TEMPLATE_VARIABLES: Array<{ token: string; description: string }> =
   { token: '{{weekday}}', description: '公開曜日 (金)' },
   { token: '[[A|B|C]]', description: 'A・B・C からランダムで1つ選ぶ' },
 ];
+
+/**
+ * 切り抜き（AutoClipMaker から届いた動画）でだけ使える変数。
+ *
+ * 元動画が分からない動画に使うと、リンクの無い「元動画→」だけが残る。
+ * それを避けるため、これらを含む本文は「使う条件＝切り抜き」でしか投稿しない。
+ */
+export const SOURCE_VARIABLES: Array<{ token: string; description: string }> = [
+  { token: '{{sourceUrl}}', description: '元動画のURL（切り抜き限定）' },
+  { token: '{{sourceUrlAt}}', description: '元動画のURL＋切り抜いた位置（切り抜き限定）' },
+  { token: '{{sourceTitle}}', description: '元動画のタイトル（切り抜き限定）' },
+  { token: '{{sourceStart}}', description: '切り抜いた位置 (12:34)（切り抜き限定）' },
+];
+
+const SOURCE_NAMES = SOURCE_VARIABLES.map((v) => v.token.slice(2, -2));
+
+/** 本文が切り抜き専用の変数を使っているか。 */
+export function usesSourceVariables(body: string): boolean {
+  return [...body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].some((m) => SOURCE_NAMES.includes(m[1] as string));
+}
+
+/** 秒を 12:34 / 1:02:03 に直す。元動画のどこかを指すための表記。 */
+function clock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${m}:${pad(r)}`;
+}
+
+/** 元動画のURLに、切り抜いた位置を足したもの。頭出しになる。 */
+function sourceUrlAt(source: ClipSource): string {
+  if (!source.startSec || !Number.isFinite(source.startSec)) return source.url;
+  const at = Math.max(0, Math.floor(source.startSec));
+  return `${source.url}${source.url.includes('?') ? '&' : '?'}t=${at}s`;
+}
 
 const JP_WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
@@ -66,6 +105,13 @@ export function renderTemplate(body: string, ctx: RenderContext): string {
     weekday,
   };
 
+  if (ctx.source) {
+    vars.sourceUrl = ctx.source.url;
+    vars.sourceUrlAt = sourceUrlAt(ctx.source);
+    vars.sourceTitle = ctx.source.title ?? '';
+    vars.sourceStart = ctx.source.startSec === undefined ? '' : clock(ctx.source.startSec);
+  }
+
   const all: Record<string, string> = { ...vars, ...(ctx.extra ?? {}) };
 
   let out = body.replace(/\{\{\s*(\w+)\s*\}\}/g, (whole, name: string) =>
@@ -80,7 +126,7 @@ export function renderTemplate(body: string, ctx: RenderContext): string {
   return out.trim();
 }
 
-function matches(template: Template, video: Pick<DetectedVideo, 'title' | 'description'>): boolean {
+function matches(template: Template, video: Pick<DetectedVideo, 'title' | 'description' | 'source'>): boolean {
   const haystack = `${video.title}\n${video.description ?? ''}`;
   switch (template.matchType) {
     case 'always':
@@ -100,6 +146,9 @@ function matches(template: Template, video: Pick<DetectedVideo, 'title' | 'descr
       } catch {
         return false; // invalid regex never matches; the UI validates on save
       }
+    case 'clip':
+      // AutoClipMaker から届いたものだけ。通常の新着検知では当たらない。
+      return Boolean(video.source);
     default:
       return false;
   }
@@ -108,13 +157,15 @@ function matches(template: Template, video: Pick<DetectedVideo, 'title' | 'descr
 /** Lowest `priority` number wins; ties break on id order from the query. */
 export function selectTemplate(
   templates: Template[],
-  video: Pick<DetectedVideo, 'title' | 'description' | 'platform'>,
+  video: Pick<DetectedVideo, 'title' | 'description' | 'platform' | 'source'>,
 ): Template | null {
   const candidates = templates
     .filter((t) => t.enabled)
     .filter((t) => t.platform === 'all' || t.platform === video.platform)
     .filter((t) => t.bodies.some((b) => b.trim().length > 0))
     .filter((t) => matches(t, video))
+    // 元動画が分からない動画に、元動画のリンクを載せる本文は使わない
+    .filter((t) => Boolean(video.source) || !t.bodies.some((b) => usesSourceVariables(b)))
     .sort((a, b) => a.priority - b.priority || a.id - b.id);
   return candidates[0] ?? null;
 }
@@ -144,6 +195,7 @@ export function validateTemplateBody(body: string, extraNames: string[] = []): s
   const errors: string[] = [];
   const known = new Set([
     ...TEMPLATE_VARIABLES.filter((v) => v.token.startsWith('{{')).map((v) => v.token.slice(2, -2)),
+    ...SOURCE_NAMES,
     ...extraNames,
   ]);
   for (const m of body.matchAll(/\{\{\s*(\w+)\s*\}\}/g)) {

@@ -17,7 +17,22 @@ export interface Account {
   credentials: OAuthCredentials | null;
 }
 
-export type MatchType = 'always' | 'keyword' | 'regex';
+export type MatchType = 'always' | 'keyword' | 'regex' | 'clip';
+
+/**
+ * AutoClipMaker が作った切り抜きの、元になった動画。
+ *
+ * 切り抜き自体のタイトルだけでは「どの試合の話か」が分からないので、
+ * コメントに元動画のリンクを載せるためにここまで持ってくる。
+ */
+export interface ClipSource {
+  /** 元動画のURL。切り抜きコメントの主役。 */
+  url: string;
+  title?: string;
+  videoId?: string;
+  /** 切り抜いた位置（元動画の秒）。「元動画の 12:34 から」に使う。 */
+  startSec?: number;
+}
 
 export interface Template {
   id: number;
@@ -80,4 +95,6 @@ export interface DetectedVideo {
   url: string;
   publishedAt: Date | null;
   raw?: unknown;
+  /** AutoClipMaker から来た切り抜きなら、その元動画。 */
+  source?: ClipSource;
 }

@@ -53,6 +53,7 @@ import {
   pickBody,
   renderTemplate,
   selectTemplate,
+  SOURCE_VARIABLES,
   TEMPLATE_VARIABLES,
   validateTemplateBody,
 } from '../../templates/engine.js';
@@ -139,6 +140,11 @@ apiRouter.get(
         tiktok: `${config.PUBLIC_URL}/oauth/tiktok/callback`,
       },
       dryRun: config.DRY_RUN,
+      // AutoClipMaker に貼り付ける値。組み立てさせずにそのまま出す
+      ingest: {
+        enabled: Boolean(config.INGEST_TOKEN),
+        url: `${config.PUBLIC_URL}/ingest/clip`,
+      },
       pollIntervalMinutes: config.POLL_INTERVAL_MINUTES,
       maxVideoAgeHours: config.MAX_VIDEO_AGE_HOURS,
       watermarks: {
@@ -174,6 +180,7 @@ apiRouter.get(
     const playlists = await getPlaylists();
     return [
       ...TEMPLATE_VARIABLES,
+      ...SOURCE_VARIABLES,
       ...playlists.flatMap((p) => [
         { token: `{{playlist_${p.key}_url}}`, description: `${p.label || p.key} の最新動画URL` },
         { token: `{{playlist_${p.key}_title}}`, description: `${p.label || p.key} の最新動画タイトル` },
@@ -374,14 +381,28 @@ apiRouter.post(
       description: z.string().default(''),
       platform: platformSchema.default('youtube'),
       body: z.string().optional(),
+      /** 切り抜き（AutoClipMaker 経由）として試す。 */
+      asClip: z.boolean().default(false),
     });
     const input = schema.parse(req.body ?? {});
+
+    // 切り抜きの見本。実際に届くのと同じ形で入れないと、
+    // 切り抜き用テンプレートのプレビューが変数のまま出てしまう
+    const clipSource = input.asClip
+      ? {
+          url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+          title: '【RIZIN】記者会見ノーカット',
+          videoId: 'dQw4w9WgXcQ',
+          startSec: 754,
+        }
+      : undefined;
 
     const templates = await listTemplates();
     const matched = selectTemplate(templates, {
       title: input.title,
       description: input.description,
       platform: input.platform,
+      source: clipSource,
     });
 
     const account = await getAccount(input.platform);
@@ -395,6 +416,7 @@ apiRouter.post(
       platform: input.platform,
       channel: account?.displayName ?? 'RIZIN',
       publishedAt: new Date(),
+      source: clipSource,
     };
 
     // An explicit body previews unsaved edits; otherwise preview the template

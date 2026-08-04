@@ -72,6 +72,17 @@ function renderConsoleUrls(s) {
       .join('');
   }
 
+  const ingestEl = $('#ingest-info');
+  if (ingestEl) {
+    ingestEl.innerHTML =
+      copyRow(['受け口URL', s.ingest?.url ?? '']) +
+      `<div class="line"><span>INGEST_TOKEN</span><span>${
+        s.ingest?.enabled
+          ? '設定済み'
+          : '<span class="badge badge-warn">未設定（連携は無効）</span>'
+      }</span></div>`;
+  }
+
   $('#console-urls').innerHTML = [
     ['プライバシーポリシー URL', s.legal.privacy],
     ['利用規約 URL', s.legal.terms],
@@ -267,7 +278,15 @@ async function loadTemplates() {
         </div>
         <div class="t-meta">
           ${t.platform === 'all' ? '両方' : t.platform === 'youtube' ? 'YouTube' : 'TikTok'} ・
-          ${t.matchType === 'always' ? 'すべての動画' : t.matchType === 'keyword' ? `キーワード: ${esc(t.matchValue)}` : `正規表現`} ・
+          ${
+            t.matchType === 'always'
+              ? 'すべての動画'
+              : t.matchType === 'keyword'
+                ? `キーワード: ${esc(t.matchValue)}`
+                : t.matchType === 'clip'
+                  ? '切り抜き（AutoClipMaker）'
+                  : '正規表現'
+          } ・
           ${t.pin ? 'ピン留めあり' : 'ピン留めなし'} ・ ${t.bodies.length} パターン
           ${t.enabled ? '' : '・<span class="badge badge-warn">無効</span>'}
         </div>
@@ -384,7 +403,8 @@ function newTemplate() {
 
 function syncMatchValueVisibility() {
   const type = form.matchType.value;
-  $('#match-value-wrap').style.display = type === 'always' ? 'none' : '';
+  // always と clip は条件の値を取らない（clip は「届いたかどうか」だけで決まる）
+  $('#match-value-wrap').style.display = type === 'always' || type === 'clip' ? 'none' : '';
   form.matchValue.placeholder =
     type === 'keyword' ? 'ハイライト, 記者会見（カンマ区切り／どれか1つ含まれば一致）' : '例: (ハイライト|HIGHLIGHT)';
 }
@@ -547,6 +567,7 @@ async function runPreview() {
   const body = {
     title: $('#preview-title').value,
     platform: $('#preview-platform').value,
+    asClip: $('#preview-as-clip').checked,
   };
   // When the editor is open, preview exactly what's on screen (including
   // unsaved edits) instead of the stored template.
@@ -575,6 +596,7 @@ async function runPreview() {
 }
 
 $('#btn-preview').addEventListener('click', runPreview);
+$('#preview-as-clip').addEventListener('change', runPreview);
 $('#preview-title').addEventListener('change', runPreview);
 $('#preview-platform').addEventListener('change', runPreview);
 

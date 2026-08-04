@@ -12,7 +12,13 @@ import {
 import { resolvePlaylistVariables } from './platforms/youtube/playlists.js';
 import { createLogger } from './logger.js';
 import { notify } from './notify/index.js';
-import { clampComment, pickBody, renderTemplate, selectTemplate } from './templates/engine.js';
+import {
+  clampComment,
+  pickBody,
+  renderTemplate,
+  selectTemplate,
+  usesSourceVariables,
+} from './templates/engine.js';
 import type { DetectedVideo } from './types.js';
 
 const log = createLogger('pipeline');
@@ -129,6 +135,9 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
   };
 
   if (options.overrideText) {
+    if (!v.source && usesSourceVariables(options.overrideText)) {
+      return { created: false, reason: '元動画が分からないため、元動画のリンクを含む本文は使えません' };
+    }
     const resolved = await resolvePlaylists(options.overrideText);
     if (resolved.failed) {
       return { created: false, reason: resolved.errors.join(' / ') };
@@ -141,6 +150,7 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
       channel: (await getAccount(v.platform))?.displayName ?? '',
       publishedAt: v.publishedAt ?? new Date(),
       extra: resolved.values,
+      source: v.source,
     });
     const clamped = clampComment(rendered, v.platform);
     if (clamped.truncated) log.warn(`manual comment truncated to platform limit for ${key}`);
@@ -152,7 +162,8 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
       log.warn(`no template matched for ${key}`, { title: v.title });
       await notify(
         '⚠️ テンプレートが見つかりません',
-        `${v.title}\n${v.url}\n\n条件に一致する有効なテンプレートがないため、コメントしませんでした。`,
+        `${v.title}\n${v.url}\n\n条件に一致する有効なテンプレートがないため、コメントしませんでした。` +
+          (v.source ? '\n\n切り抜き用のテンプレート（使う条件＝切り抜き）があるか確認してください。' : ''),
       );
       return { created: false, reason: '一致するテンプレートがありません' };
     }
@@ -165,6 +176,7 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
 
     const rendered = renderTemplate(body, {
       extra: resolved.values,
+      source: v.source,
       title: v.title,
       url: v.url,
       videoId: v.videoId,

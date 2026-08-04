@@ -107,6 +107,7 @@
                 <option value="always">すべての動画</option>
                 <option value="keyword">キーワードを含むとき</option>
                 <option value="regex">正規表現に一致するとき</option>
+                <option value="clip">切り抜きのとき（AutoClipMaker から届いた動画）</option>
               </select>
             </label>
             <label id="match-value-wrap">条件の値
@@ -171,6 +172,9 @@
               <option value="youtube">YouTube</option>
               <option value="tiktok">TikTok</option>
             </select>
+          </label>
+          <label class="checkbox">
+            <input id="preview-as-clip" type="checkbox"> 切り抜きとして試す（元動画つき）
           </label>
           <button id="btn-preview" class="btn btn-ghost">プレビュー</button>
           <div id="preview-result"></div>
@@ -301,6 +305,23 @@
       </div>
 
       <div id="screenshot-view"></div>
+    </div>
+
+    <div class="card">
+      <h3>3. AutoClipMaker との連携（任意）</h3>
+      <p class="hint">
+        AutoClipMaker で作った切り抜きを YouTube に投稿したとき、その切り抜きに
+        <strong>元動画のリンク入りコメント</strong>を付けてピン留めできます。
+        文面は「使う条件＝切り抜き」のテンプレートで決めます。
+      </p>
+      <div class="notice">
+        <strong>つなぎ方</strong>
+        <p class="hint" style="margin:6px 0">
+          ① このアプリの環境変数に <code>INGEST_TOKEN</code>（好きな長い文字列）を設定
+          ／ ② AutoClipMaker 側に下の受け口URLと同じトークンを設定
+        </p>
+        <div id="ingest-info" class="kv"></div>
+      </div>
     </div>
   </section>
 

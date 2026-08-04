@@ -40,6 +40,10 @@ const schema = z.object({
   LEGAL_ORG_NAME: z.string().optional().default(''),
   LEGAL_CONTACT_EMAIL: z.string().optional().default(''),
 
+  // AutoClipMaker など外部ツールから切り抜きを持ち込むための共有トークン。
+  // 未設定なら受け口ごと閉じる（誰でもコメントを投げ込める状態にしない）。
+  INGEST_TOKEN: z.string().optional().default(''),
+
   ENABLE_BROWSER_AUTOMATION: bool(true),
   POLL_INTERVAL_MINUTES: int(5),
   NOTIFY_WEBHOOK_URL: z.string().optional().default(''),
