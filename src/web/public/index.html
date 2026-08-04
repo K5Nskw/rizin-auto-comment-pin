@@ -279,6 +279,11 @@
         取得方法：PCのブラウザで対象アカウントにログイン → Cookie エクスポート拡張機能で JSON
         形式でコピー → 下に貼り付け。詳細は <code>docs/BROWSER-SESSION.md</code> を参照。
       </p>
+      <p class="hint">
+        <strong>拡張機能が出した JSON をそのまま貼って構いません。</strong>
+        Cookie の配列でも、<code>{"cookies": [...]}</code> のように包まれていても読み込めます。
+        シークレットウィンドウで書き出し、<strong>ログアウトせずに閉じる</strong>と長持ちします。
+      </p>
 
       <div class="session-block">
         <h4>YouTube</h4>

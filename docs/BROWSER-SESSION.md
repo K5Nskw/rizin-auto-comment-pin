@@ -43,7 +43,22 @@ PCのブラウザ（Chrome / Edge）で作業します。
 ]
 ```
 
-Playwright の `storageState` 形式（`{"cookies": [...], "origins": [...]}`）でも受け付けます。
+**拡張機能が出す JSON は、そのまま貼り付けて大丈夫です。** 形は問いません。
+
+| 貼り付けられる形 | 例 |
+|---|---|
+| Cookie の配列 | `[ { "name": ..., "value": ... }, ... ]` |
+| 配列を包んだもの | `{"cookies": [...]}` / `{"url": "...", "cookies": [...]}` / `{"data": [...]}` |
+| Playwright の storageState | `{"cookies": [...], "origins": [...]}` |
+
+拡張機能ごとの違い（`expirationDate` と `expires`、`sameSite` が `no_restriction` や
+`unspecified`、`hostOnly` や `storeId` などの余分な項目）は、こちらで吸収します。
+
+貼り付けた時点で読めなければ、**その場でエラーが出ます**。保存できたのに後から
+動かない、ということは起きません。
+
+> **cookies.txt（Netscape形式）は受け付けません。** 拡張機能の書き出し形式で JSON を選んでください。
+> （AutoClipMaker 側の Cookie は cookies.txt なので、取り違えに注意してください）
 
 ## 4-2. 管理画面に登録する
 

@@ -341,27 +341,90 @@ export async function checkLogin(
 }
 
 /**
- * Accepts either a Playwright storageState JSON or a plain cookie array
- * exported by a browser extension, and normalises it to storageState shape.
+ * Turns whatever a Cookie 拡張機能 produced into Playwright's storageState.
+ *
+ * Every entry is rebuilt field by field, including the ones that arrived
+ * already wrapped in `{cookies: [...]}`. Passing those through untouched used
+ * to look like it worked — the paste was accepted — and then the browser
+ * refused the jar hours later at posting time, because extensions write
+ * `expirationDate` instead of `expires`, `sameSite: "no_restriction"`, and
+ * extra keys (`hostOnly`, `session`, `storeId`) that Playwright rejects.
  */
 export function normaliseStorageState(input: unknown, domainHint: string): unknown {
-  if (input && typeof input === 'object' && 'cookies' in (input as any)) return input;
+  const { list, origins } = findCookieList(input);
 
-  if (Array.isArray(input)) {
-    const cookies = input.map((c: any) => ({
-      name: c.name,
-      value: c.value,
-      domain: c.domain ?? domainHint,
-      path: c.path ?? '/',
-      expires: typeof c.expirationDate === 'number' ? Math.floor(c.expirationDate) : (c.expires ?? -1),
-      httpOnly: Boolean(c.httpOnly),
-      secure: c.secure ?? true,
-      sameSite: normaliseSameSite(c.sameSite),
-    }));
-    return { cookies, origins: [] };
+  if (!list) {
+    if (typeof input === 'string') {
+      if (/^#|\tTRUE\t|\tFALSE\t/m.test(input)) {
+        throw new Error(
+          'Netscape 形式（cookies.txt）に見えます。この画面は JSON 形式を受け取ります。' +
+            '拡張機能の書き出し形式で JSON を選んで、その中身を貼り付けてください。',
+        );
+      }
+      throw new Error(
+        'JSON として読み取れませんでした。引用符やカンマ、貼り付け漏れがないか確認してください。',
+      );
+    }
+    throw new Error(
+      'Cookie の形式が認識できません。Cookie の配列（[ { "name": ..., "value": ... }, ... ]）か、' +
+        'それを含む JSON を貼り付けてください。',
+    );
   }
 
-  throw new Error('Cookie の形式が認識できません。storageState JSON か Cookie 配列を貼り付けてください。');
+  const cookies = list
+    .filter((c) => c && typeof c === 'object' && c.name)
+    .map((c: any) => {
+      // 拡張機能ごとに名前が違う。あるものを順に見る
+      const rawExpiry = c.expirationDate ?? c.expires ?? c.expiry ?? c.expiration_date;
+      const expires = Number(rawExpiry);
+      const domain = String(c.domain || domainHint);
+      return {
+        name: String(c.name),
+        value: String(c.value ?? ''),
+        // hostOnly の Cookie に先頭ドットを付けると、別のドメイン宛てになる
+        domain: c.hostOnly === true ? domain.replace(/^\./, '') : domain,
+        path: String(c.path || '/'),
+        // セッション Cookie（期限なし）は -1。0 や過去日を渡すと即座に消える
+        expires: Number.isFinite(expires) && expires > 0 ? Math.floor(expires) : -1,
+        httpOnly: Boolean(c.httpOnly),
+        secure: typeof c.secure === 'boolean' ? c.secure : true,
+        sameSite: normaliseSameSite(c.sameSite),
+      };
+    });
+
+  if (cookies.length === 0) {
+    throw new Error('Cookie が1件も見つかりませんでした。name と value を含む JSON を貼り付けてください。');
+  }
+  return { cookies, origins };
+}
+
+/**
+ * Digs the cookie array out of the shapes seen in the wild: a bare array,
+ * Playwright's `{cookies, origins}`, `{url, cookies}` from Cookie-Editor, a
+ * `{data: [...]}` wrapper, and a JSON string that was quoted a second time.
+ */
+function findCookieList(input: unknown, depth = 0): { list: any[] | null; origins: any[] } {
+  if (depth > 3) return { list: null, origins: [] };
+
+  if (typeof input === 'string') {
+    try {
+      return findCookieList(JSON.parse(input), depth + 1);
+    } catch {
+      return { list: null, origins: [] };
+    }
+  }
+  if (Array.isArray(input)) return { list: input, origins: [] };
+
+  if (input && typeof input === 'object') {
+    const obj = input as Record<string, unknown>;
+    const origins = Array.isArray(obj.origins) ? (obj.origins as any[]) : [];
+    for (const key of ['cookies', 'data', 'Cookies', 'cookie']) {
+      const found = obj[key];
+      if (Array.isArray(found)) return { list: found, origins };
+      if (typeof found === 'string') return { list: findCookieList(found, depth + 1).list, origins };
+    }
+  }
+  return { list: null, origins: [] };
 }
 
 /**

@@ -600,15 +600,10 @@ apiRouter.post(
       .object({ cookies: z.string().min(2), merge: z.boolean().default(false) })
       .parse(req.body);
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw.cookies);
-    } catch {
-      throw new Error('JSON として読み取れませんでした');
-    }
-
+    // 生の文字列のまま渡す。読めなかった理由（JSONが壊れている / cookies.txt を
+    // 貼っている / Cookie が1件も無い）を、向こうで見分けて返してもらう
     const domain = platform === 'youtube' ? '.youtube.com' : '.tiktok.com';
-    let state = normaliseStorageState(parsed, domain);
+    let state = normaliseStorageState(raw.cookies, domain);
 
     // Merging lets youtube.com and google.com exports coexist; a browser
     // extension only ever exports one site at a time.
