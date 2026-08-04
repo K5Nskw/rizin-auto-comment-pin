@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS templates (
   platform     TEXT NOT NULL DEFAULT 'all',      -- 'all' | 'youtube' | 'tiktok'
   enabled      BOOLEAN NOT NULL DEFAULT TRUE,
   priority     INTEGER NOT NULL DEFAULT 100,     -- 小さいほど優先
-  match_type   TEXT NOT NULL DEFAULT 'always',   -- 'always' | 'keyword' | 'regex'
+  match_type   TEXT NOT NULL DEFAULT 'always',   -- 'always' | 'keyword' | 'regex' | 'clip'
   match_value  TEXT NOT NULL DEFAULT '',
   bodies       JSONB NOT NULL DEFAULT '[]'::jsonb, -- 複数入れるとランダムで1つ選ばれる
   pin          BOOLEAN NOT NULL DEFAULT TRUE,

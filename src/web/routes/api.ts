@@ -55,6 +55,7 @@ import {
   selectTemplate,
   SOURCE_VARIABLES,
   TEMPLATE_VARIABLES,
+  usesSourceVariables,
   validateTemplateBody,
 } from '../../templates/engine.js';
 import type { Platform } from '../../types.js';
@@ -69,7 +70,7 @@ const templateSchema = z.object({
   platform: z.enum(['all', 'youtube', 'tiktok']),
   enabled: z.boolean(),
   priority: z.number().int().min(0).max(9999),
-  matchType: z.enum(['always', 'keyword', 'regex']),
+  matchType: z.enum(['always', 'keyword', 'regex', 'clip']),
   matchValue: z.string(),
   bodies: z.array(z.string()).min(1, 'コメント本文を1つ以上入力してください'),
   pin: z.boolean(),
@@ -363,8 +364,17 @@ async function cleanBodies<T extends { bodies: string[]; matchType: string; matc
       throw new Error('正規表現が不正です');
     }
   }
-  if (input.matchType !== 'always' && !input.matchValue.trim()) {
+  // always と clip は条件の値を取らない。clip は「切り抜きとして届いたかどうか」だけで決まる
+  if (input.matchType !== 'always' && input.matchType !== 'clip' && !input.matchValue.trim()) {
     throw new Error('条件（キーワード / 正規表現）を入力してください');
+  }
+  // 元動画が分かるのは切り抜きの経路だけ。他の条件で書いても永久に使われないので、
+  // 黙って保存させず、ここで気づけるようにする
+  if (input.matchType !== 'clip' && bodies.some((b) => usesSourceVariables(b))) {
+    throw new Error(
+      '元動画の変数（{{sourceUrl}} など）は切り抜きにしか使えません。' +
+        '「使う条件」を「切り抜きのとき」にしてください',
+    );
   }
   return { ...input, bodies };
 }
