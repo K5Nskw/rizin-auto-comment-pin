@@ -257,7 +257,17 @@
     </div>
 
     <div class="card">
-      <h3>2. ログインセッションの登録（ピン留め / TikTokコメント用）</h3>
+      <h3>2. AutoClipMaker 連携（切り抜きの関連動画設定）</h3>
+      <p class="hint">
+        AutoClipMaker が切り抜きを投稿すると、その Shorts の<strong>「関連動画」に元動画が自動で設定</strong>されます
+        （非公開のままでも実行されます）。設定項目はありません。両側に同じトークンを入れるだけです。
+      </p>
+      <div id="ingest-status" class="status"></div>
+      <div id="ingest-urls" class="kv" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card">
+      <h3>3. ログインセッションの登録（ピン留め / 関連動画 / TikTokコメント用）</h3>
       <div class="notice">
         <strong>なぜ必要か：</strong>
         YouTube・TikTok のどちらにも「コメントをピン留めする」公式APIがありません。

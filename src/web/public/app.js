@@ -83,6 +83,22 @@ function renderConsoleUrls(s) {
     .map(copyRow)
     .join('');
 
+  const ingestEl = $('#ingest-status');
+  if (ingestEl) {
+    ingestEl.innerHTML = `
+      <div class="line"><span>受け口</span><span class="badge ${
+        s.ingestConfigured ? 'badge-ok' : 'badge-err'
+      }">${s.ingestConfigured ? '有効' : 'INGEST_TOKEN が未設定'}</span></div>
+      <div class="line"><span>関連動画の設定</span><span class="badge ${
+        s.browser && s.browser.available ? 'badge-ok' : 'badge-err'
+      }">${s.browser && s.browser.available ? '実行可能' : 'ブラウザ自動操作が利用不可'}</span></div>`;
+    $('#ingest-urls').innerHTML = [
+      ['AutoClipMaker の COMMENT_HOOK_URL', s.ingestUrl || ''],
+    ]
+      .map(copyRow)
+      .join('');
+  }
+
   $$('.btn-copy').forEach((b) =>
     b.addEventListener('click', async () => {
       await navigator.clipboard.writeText(b.dataset.copy);
@@ -685,6 +701,23 @@ $('#btn-add-exclusion').addEventListener('click', async (e) => {
 
 /* ---------------------------------- jobs ---------------------------------- */
 
+/**
+ * Only clips have a source to point at, so anything else reads as 対象外
+ * rather than as a step that failed.
+ */
+function relatedCell(j) {
+  if (!j.setRelated) return '<span class="hint">対象外</span>';
+  const src = j.video.source;
+  const link = src
+    ? `<div class="hint" style="margin-top:2px"><a href="${esc(src.url)}" target="_blank" rel="noopener">${esc(
+        src.title || src.videoId,
+      )}</a></div>`
+    : '';
+  return j.relatedDone
+    ? `<span class="badge badge-ok">設定済み</span>${link}`
+    : `<span class="badge badge-warn">未設定</span>${link}`;
+}
+
 let jobs = [];
 
 async function loadJobs() {
@@ -704,7 +737,7 @@ async function loadJobs() {
   $('#jobs-table').innerHTML = `<table>
     <thead><tr>
       <th>検知日時</th><th>媒体</th><th>動画</th><th>状態</th>
-      <th>コメント / ピン</th><th>コメント本文</th><th></th>
+      <th>コメント / ピン</th><th>関連動画</th><th>コメント本文</th><th></th>
     </tr></thead>
     <tbody>${jobs
       .map(
@@ -716,6 +749,7 @@ async function loadJobs() {
         <td><span class="badge ${badge(j.status)}">${STATUS_LABELS[j.status] || j.status}</span>
             ${j.lastError ? `<div class="hint" style="margin:4px 0 0;color:var(--err)">${esc(j.lastError)}</div>` : ''}</td>
         <td>${j.commentDone ? '✅' : '—'} / ${j.shouldPin ? (j.pinDone ? '✅' : '—') : '対象外'}</td>
+        <td>${relatedCell(j)}</td>
         <td class="comment">${esc(j.commentText)}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-ghost" data-retry="${j.id}">再実行</button>
@@ -723,6 +757,11 @@ async function loadJobs() {
             j.commentDone ? 'コメント削除' : '削除'
           }</button>
           <button class="btn btn-ghost" data-exclude-url="${esc(j.video.url)}" style="margin-top:4px">今後も除外</button>
+          ${
+            j.setRelated
+              ? `<button class="btn btn-ghost" data-set-related="${j.id}" style="margin-top:4px">関連動画を再設定</button>`
+              : ''
+          }
         </td>
       </tr>`,
       )
@@ -753,6 +792,24 @@ async function loadJobs() {
       } catch (err) {
         alert(err.message);
         b.disabled = false;
+      }
+    }),
+  );
+
+  $$('[data-set-related]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      const original = b.textContent;
+      b.textContent = '設定中…（1分ほど）';
+      try {
+        const r = await api(`/jobs/${b.dataset.setRelated}/related`, { method: 'POST' });
+        alert(r.note || '設定しました');
+        await loadJobs();
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        b.disabled = false;
+        b.textContent = original;
       }
     }),
   );

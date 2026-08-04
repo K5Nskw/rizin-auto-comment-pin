@@ -33,6 +33,7 @@ import {
   resetWatermark,
   saveBrowserSession,
   setExclusions,
+  updateJob,
   setPlaylists,
   updateTemplate,
   videoKey,
@@ -58,6 +59,7 @@ import {
   validateTemplateBody,
 } from '../../templates/engine.js';
 import type { Platform } from '../../types.js';
+import { setRelatedVideo } from '../../browser/studio.js';
 import { requeueJob } from '../../worker.js';
 
 export const apiRouter: Router = Router();
@@ -441,6 +443,31 @@ apiRouter.post(
   handle(async (req) => {
     await requeueJob(Number(req.params.id));
     return { ok: true };
+  }),
+);
+
+/**
+ * Re-runs only the related-video step.
+ *
+ * Separate from "再実行", which restarts the whole job: once a comment is
+ * posted, the operator needs a way to retry the Studio half without touching
+ * it.
+ */
+apiRouter.post(
+  '/jobs/:id/related',
+  handle(async (req) => {
+    const job = await getJob(Number(req.params.id));
+    if (!job) throw new Error('ジョブが見つかりません');
+    if (!job.video.source?.videoId) {
+      throw new Error('この動画には元動画の情報がありません（AutoClipMaker 経由の切り抜きではありません）');
+    }
+    if (!(await browserAvailable())) {
+      throw new Error('ブラウザ自動操作が利用できないため、関連動画を設定できません');
+    }
+
+    await setRelatedVideo(job.video.videoId, job.video.source.videoId);
+    await updateJob(job.id, { relatedDone: true, lastError: null });
+    return { ok: true, note: `関連動画を「${job.video.source.title || job.video.source.videoId}」に設定しました。` };
   }),
 );
 
