@@ -7,6 +7,7 @@ import { createLogger } from '../logger.js';
 import { requireAdmin } from './auth.js';
 import { legalRouter } from './legal.js';
 import { apiRouter } from './routes/api.js';
+import { ingestRouter } from './routes/ingest.js';
 import { oauthRouter } from './routes/oauth.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -41,6 +42,8 @@ export function createServer() {
   app.use(express.json({ limit: '6mb' }));
   app.use('/oauth', oauthRouter);
   app.use('/api', requireAdmin, apiRouter);
+  // 管理画面のパスワードではなく共有トークンで守る。外部ツール専用の口。
+  app.use('/ingest', ingestRouter);
 
   const publicDir = resolve(dirname(fileURLToPath(import.meta.url)), 'public');
   app.use('/admin', requireAdmin, express.static(publicDir, { index: 'index.html' }));
