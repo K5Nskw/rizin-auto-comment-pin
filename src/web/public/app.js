@@ -713,9 +713,12 @@ function relatedCell(j) {
         src.title || src.videoId,
       )}</a></div>`
     : '';
-  return j.relatedDone
-    ? `<span class="badge badge-ok">設定済み</span>${link}`
-    : `<span class="badge badge-warn">未設定</span>${link}`;
+  if (j.relatedDone) return `<span class="badge badge-ok">設定済み</span>${link}`;
+  // 「未設定」だけでは何を直せばいいのか分からない。落ちた理由をそのまま出す
+  const why = j.relatedError
+    ? `<div class="hint" style="margin-top:2px;color:var(--warn)">${esc(j.relatedError.split('\n')[0])}</div>`
+    : '';
+  return `<span class="badge badge-warn">未設定</span>${link}${why}`;
 }
 
 let jobs = [];

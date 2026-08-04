@@ -82,6 +82,8 @@ export interface Job {
   /** Whether this job should link the Short back to its source video. */
   setRelated: boolean;
   relatedDone: boolean;
+  /** 関連動画だけが失敗した理由。コメントは投稿されている。 */
+  relatedError: string | null;
   attempts: number;
   lastError: string | null;
   runAfter: Date;

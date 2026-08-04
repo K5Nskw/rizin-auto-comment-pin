@@ -466,7 +466,7 @@ apiRouter.post(
     }
 
     await setRelatedVideo(job.video.videoId, job.video.source.videoId);
-    await updateJob(job.id, { relatedDone: true, lastError: null });
+    await updateJob(job.id, { relatedDone: true, relatedError: null });
     return { ok: true, note: `関連動画を「${job.video.source.title || job.video.source.videoId}」に設定しました。` };
   }),
 );

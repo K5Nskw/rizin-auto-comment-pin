@@ -229,6 +229,7 @@ function toJob(row: Record<string, any>): Job {
     pinDone: row.pin_done,
     setRelated: row.set_related,
     relatedDone: row.related_done,
+    relatedError: row.related_error ?? null,
     attempts: row.attempts,
     lastError: row.last_error,
     runAfter: row.run_after,
@@ -328,6 +329,7 @@ export async function updateJob(
     commentDone: boolean;
     pinDone: boolean;
     relatedDone: boolean;
+    relatedError: string | null;
     setRelated: boolean;
     attempts: number;
     lastError: string | null;
@@ -342,6 +344,7 @@ export async function updateJob(
     commentDone: 'comment_done',
     pinDone: 'pin_done',
     relatedDone: 'related_done',
+    relatedError: 'related_error',
     setRelated: 'set_related',
     attempts: 'attempts',
     lastError: 'last_error',

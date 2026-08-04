@@ -61,19 +61,27 @@ async function processYouTube(job: JobWithVideo): Promise<void> {
   // an unlisted or private clip can carry the link from the moment it is
   // uploaded, and waiting for publication would leave it missing in the window
   // that matters most.
+  //
+  // 失敗しても先へ進む。Studio の画面操作は、UIの変更や Cookie の失効で
+  // 落ちうる。ここで職を止めると、リンクが張れないだけでコメントまで
+  // 投稿されなくなる（しかも5回試して諦めるので、その間ずっと出ない）。
+  // 理由は related_error に残し、投稿履歴から個別にやり直せるようにする。
   if (job.setRelated && !job.relatedDone && job.video.source?.videoId) {
-    if (await browserAvailable()) {
+    try {
+      if (!(await browserAvailable())) {
+        throw new Error(
+          'ブラウザ自動操作が使えません（Chromium が無いか ENABLE_BROWSER_AUTOMATION=false）',
+        );
+      }
       await setRelatedVideo(job.video.videoId, job.video.source.videoId);
-      await updateJob(job.id, { relatedDone: true, lastError: null });
+      await updateJob(job.id, { relatedDone: true, relatedError: null });
       job.relatedDone = true;
       log.info(`job #${job.id}: related video set`);
-    } else {
-      // 黙って飛ばすと、管理画面では「未設定」とだけ出て理由が分からない。
-      // ログに残しておけば、あとから「なぜ付いていないのか」を辿れる
-      log.warn(
-        `job #${job.id}: ブラウザ自動操作が使えないため関連動画を設定できませんでした。` +
-          'Cookie の登録と Chromium の状態を確認してから、投稿履歴の「関連動画を設定」で実行してください',
-      );
+    } catch (e) {
+      const message = errMessage(e);
+      log.warn(`job #${job.id}: 関連動画を設定できませんでした: ${message}`);
+      await updateJob(job.id, { relatedError: message.slice(0, 2000) });
+      job.relatedError = message;
     }
   }
 
