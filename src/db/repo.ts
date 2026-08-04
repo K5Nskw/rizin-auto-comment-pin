@@ -272,6 +272,33 @@ export async function createJob(input: {
  * Atomically leases due jobs by pushing run_after forward, so a crash mid-run
  * simply retries a few minutes later instead of losing the job.
  */
+/**
+ * 既にあるジョブに、関連動画の設定を後付けで有効にする。
+ *
+ * ジョブは動画1本につき1件しか作らない。そのため、切り抜きだと分かる前に
+ * ジョブができていると（RSSが先に拾った、連携を入れる前に投稿した、など）、
+ * set_related が FALSE のまま二度と設定されない。あとから元動画が分かった
+ * ときに、その1件を拾い直せるようにする。
+ *
+ * 終わったジョブは「待機」に戻す。コメントとピン留めはそれぞれ済みフラグで
+ * 守られているので、もう一度通しても投稿し直しにはならない。
+ */
+export async function enableRelatedStep(videoKey: string): Promise<boolean> {
+  const row = await queryOne(
+    `UPDATE jobs
+        SET set_related = TRUE,
+            status = CASE WHEN status IN ('done', 'needs_manual') THEN 'pending' ELSE status END,
+            run_after = now(),
+            updated_at = now()
+      WHERE video_key = $1
+        AND related_done = FALSE
+        AND status <> 'failed'
+      RETURNING id`,
+    [videoKey],
+  );
+  return Boolean(row);
+}
+
 export async function claimDueJobs(limit = 5): Promise<JobWithVideo[]> {
   const rows = await query(
     `UPDATE jobs SET run_after = now() + interval '5 minutes', updated_at = now()

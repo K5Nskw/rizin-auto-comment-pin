@@ -68,7 +68,12 @@ async function processYouTube(job: JobWithVideo): Promise<void> {
       job.relatedDone = true;
       log.info(`job #${job.id}: related video set`);
     } else {
-      log.warn(`job #${job.id}: browser unavailable, skipping related video`);
+      // 黙って飛ばすと、管理画面では「未設定」とだけ出て理由が分からない。
+      // ログに残しておけば、あとから「なぜ付いていないのか」を辿れる
+      log.warn(
+        `job #${job.id}: ブラウザ自動操作が使えないため関連動画を設定できませんでした。` +
+          'Cookie の登録と Chromium の状態を確認してから、投稿履歴の「関連動画を設定」で実行してください',
+      );
     }
   }
 

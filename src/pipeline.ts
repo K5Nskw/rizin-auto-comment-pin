@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import {
   createJob,
+  enableRelatedStep,
   ensureWatermark,
   getAccount,
   getPlaylists,
@@ -213,7 +214,18 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
     setRelated: Boolean(v.source?.videoId),
   });
 
-  if (!job) return { created: false, reason: 'この動画のジョブは既に存在します（重複投稿は行いません）' };
+  if (!job) {
+    // 切り抜きだと後から分かることがある（新着検知が先に拾った、連携を入れる前に
+    // 投稿した）。そのときはジョブを作り直せないので、関連動画の設定だけ足す。
+    if (v.source?.videoId && (await enableRelatedStep(key))) {
+      log.info(`enabled the related-video step on the existing job for ${key}`);
+      return {
+        created: false,
+        reason: 'この動画のジョブは既にありました。関連動画の設定だけ予約しました（コメントは重複しません）',
+      };
+    }
+    return { created: false, reason: 'この動画のジョブは既に存在します（重複投稿は行いません）' };
+  }
 
   log.info(`job #${job.id} queued for ${key}`, { template: templateName, delay: delaySeconds });
   return {
