@@ -7,6 +7,7 @@ import { createLogger } from '../logger.js';
 import { requireAdmin } from './auth.js';
 import { legalRouter } from './legal.js';
 import { apiRouter } from './routes/api.js';
+import { ingestRouter } from './routes/ingest.js';
 import { oauthRouter } from './routes/oauth.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -39,6 +40,11 @@ export function createServer() {
   app.use(legalRouter);
 
   app.use(express.json({ limit: '6mb' }));
+
+  // Machine-to-machine: authenticated by INGEST_TOKEN rather than the admin
+  // password, so it sits outside requireAdmin.
+  app.use('/ingest', ingestRouter);
+
   app.use('/oauth', oauthRouter);
   app.use('/api', requireAdmin, apiRouter);
 

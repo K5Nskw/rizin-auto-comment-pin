@@ -201,6 +201,8 @@ export async function ingestVideo(v: DetectedVideo, options: IngestOptions = {})
     commentText: text,
     shouldPin,
     runAfter: new Date(Date.now() + delaySeconds * 1000),
+    // Only a clip has somewhere to point back to.
+    setRelated: Boolean(v.source?.videoId),
   });
 
   if (!job) return { created: false, reason: 'この動画のジョブは既に存在します（重複投稿は行いません）' };

@@ -8,7 +8,7 @@ import {
   mergeStorageState,
   normaliseStorageState,
 } from '../../browser/session.js';
-import { config, configWarnings, legalUrls } from '../../config.js';
+import { config, configWarnings, ingestUrl, legalUrls } from '../../config.js';
 import {
   browserSessionInfo,
   createTemplate,
@@ -134,6 +134,8 @@ apiRouter.get(
       // Surfaced so the operator can copy them straight into the Google /
       // TikTok developer consoles instead of assembling them by hand.
       legal: legalUrls(),
+      ingestUrl: ingestUrl(),
+      ingestConfigured: Boolean(config.INGEST_TOKEN),
       redirectUris: {
         youtube: `${config.PUBLIC_URL}/oauth/youtube/callback`,
         tiktok: `${config.PUBLIC_URL}/oauth/tiktok/callback`,

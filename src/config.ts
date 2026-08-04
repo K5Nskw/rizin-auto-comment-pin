@@ -35,6 +35,10 @@ const schema = z.object({
   TIKTOK_CLIENT_KEY: z.string().optional().default(''),
   TIKTOK_CLIENT_SECRET: z.string().optional().default(''),
 
+  // Shared secret for POST /ingest/clip. AutoClipMaker sends it as a bearer
+  // token (its COMMENT_HOOK_TOKEN); without it the endpoint stays closed.
+  INGEST_TOKEN: z.string().optional().default(''),
+
   // Shown on the public /privacy and /terms pages, which TikTok's app review
   // requires a URL for.
   LEGAL_ORG_NAME: z.string().optional().default(''),
@@ -88,10 +92,14 @@ export function configWarnings(): string[] {
   if (!config.YOUTUBE_CLIENT_ID) w.push('YOUTUBE_CLIENT_ID が未設定です。YouTube 連携ができません。');
   if (!config.WEBSUB_SECRET) w.push('WEBSUB_SECRET が未設定です。YouTube の即時通知が無効になります（ポーリングのみ）。');
   if (!config.TIKTOK_CLIENT_KEY) w.push('TIKTOK_CLIENT_KEY が未設定です。TikTok の新着検知ができません。');
+  if (!config.INGEST_TOKEN)
+    w.push('INGEST_TOKEN が未設定です。AutoClipMaker からの切り抜き連携を受け付けられません。');
   if (!config.LEGAL_ORG_NAME || !config.LEGAL_CONTACT_EMAIL)
     w.push('LEGAL_ORG_NAME / LEGAL_CONTACT_EMAIL が未設定です。/privacy と /terms を審査に提出する前に設定してください。');
   return w;
 }
+
+export const ingestUrl = () => `${config.PUBLIC_URL}/ingest/clip`;
 
 export const legalUrls = () => ({
   privacy: `${config.PUBLIC_URL}/privacy`,

@@ -1,5 +1,6 @@
 import { browserAvailable, BrowserUnavailable } from './browser/session.js';
 import { commentAndPin, pinExistingComment } from './browser/tiktok.js';
+import { setRelatedVideo } from './browser/studio.js';
 import { pinComment } from './browser/youtube.js';
 import { claimDueJobs, deleteJob, isExcluded, updateJob } from './db/repo.js';
 import { createLogger, errMessage } from './logger.js';
@@ -54,7 +55,24 @@ async function processJob(job: JobWithVideo): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 async function processYouTube(job: JobWithVideo): Promise<void> {
-  // 1. Comment via the Data API.
+  // 1. Link the Short back to the video it was cut from.
+  //
+  // Done before the comment because it does not need the clip to be public:
+  // an unlisted or private clip can carry the link from the moment it is
+  // uploaded, and waiting for publication would leave it missing in the window
+  // that matters most.
+  if (job.setRelated && !job.relatedDone && job.video.source?.videoId) {
+    if (await browserAvailable()) {
+      await setRelatedVideo(job.video.videoId, job.video.source.videoId);
+      await updateJob(job.id, { relatedDone: true, lastError: null });
+      job.relatedDone = true;
+      log.info(`job #${job.id}: related video set`);
+    } else {
+      log.warn(`job #${job.id}: browser unavailable, skipping related video`);
+    }
+  }
+
+  // 2. Comment via the Data API.
   if (!job.commentDone) {
     const status = await getVideoStatus(job.video.videoId);
     if (!status) throw new Error('動画が見つかりません（削除された可能性）');
@@ -79,7 +97,7 @@ async function processYouTube(job: JobWithVideo): Promise<void> {
     log.info(`job #${job.id}: comment posted`);
   }
 
-  // 2. Pin via browser automation (no API exists for this).
+  // 3. Pin via browser automation (no API exists for this).
   if (!job.shouldPin) {
     await finish(job);
     return;

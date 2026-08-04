@@ -83,3 +83,20 @@ CREATE TABLE IF NOT EXISTS logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS logs_created_idx ON logs (created_at DESC);
+
+-- --------------------------------------------------------------------------
+-- Clips reported by AutoClipMaker.
+--
+-- The hook hands us the source video directly, so none of this is inferred
+-- from titles. Columns rather than a side table: each belongs to exactly one
+-- video and is read on the same path as the rest of its row.
+-- --------------------------------------------------------------------------
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS source_video_id  TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS source_url       TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS source_title     TEXT;
+ALTER TABLE videos ADD COLUMN IF NOT EXISTS source_start_sec INTEGER;
+
+-- Setting a Short's "related video" is a third step alongside comment and pin,
+-- and unlike them it works while the clip is still private.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS set_related  BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS related_done BOOLEAN NOT NULL DEFAULT FALSE;

@@ -78,6 +78,7 @@ YouTubeのコメント投稿までを自動で行い、ピン留めは「手動�
 3. [TikTok を連携する](docs/SETUP-TIKTOK.md)
 4. [ピン留め用のログインCookieを登録する](docs/BROWSER-SESSION.md)
 5. [コメント文を編集する](docs/TEMPLATES.md)
+6. [AutoClipMaker と連携する](docs/AUTOCLIPMAKER.md)（任意）
 
 ### 最短の流れ
 

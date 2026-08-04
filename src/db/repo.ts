@@ -150,6 +150,14 @@ function toVideo(row: Record<string, any>): VideoRecord {
     url: row.url,
     publishedAt: row.published_at,
     detectedAt: row.detected_at,
+    source: row.source_video_id
+      ? {
+          videoId: row.source_video_id,
+          url: row.source_url ?? '',
+          title: row.source_title ?? '',
+          startSec: row.source_start_sec ?? null,
+        }
+      : null,
   };
 }
 
@@ -159,8 +167,9 @@ export const videoKey = (platform: Platform, videoId: string) => `${platform}:${
 export async function recordVideo(v: DetectedVideo): Promise<{ isNew: boolean; video: VideoRecord }> {
   const key = videoKey(v.platform, v.videoId);
   const inserted = await queryOne(
-    `INSERT INTO videos (key, platform, video_id, title, description, url, published_at, raw)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+    `INSERT INTO videos (key, platform, video_id, title, description, url, published_at, raw,
+                         source_video_id, source_url, source_title, source_start_sec)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12)
      ON CONFLICT (key) DO NOTHING
      RETURNING *`,
     [
@@ -172,9 +181,23 @@ export async function recordVideo(v: DetectedVideo): Promise<{ isNew: boolean; v
       v.url,
       v.publishedAt,
       JSON.stringify(v.raw ?? null),
+      v.source?.videoId ?? null,
+      v.source?.url ?? null,
+      v.source?.title ?? null,
+      v.source?.startSec ?? null,
     ],
   );
   if (inserted) return { isNew: true, video: toVideo(inserted) };
+
+  // A clip can be detected by the watcher before its hook arrives, or the hook
+  // may be re-sent. Fill in the source rather than discarding it.
+  if (v.source) {
+    await query(
+      `UPDATE videos SET source_video_id = $2, source_url = $3, source_title = $4, source_start_sec = $5
+       WHERE key = $1 AND source_video_id IS NULL`,
+      [key, v.source.videoId, v.source.url, v.source.title, v.source.startSec],
+    );
+  }
 
   const existing = await queryOne('SELECT * FROM videos WHERE key = $1', [key]);
   return { isNew: false, video: toVideo(existing!) };
@@ -202,6 +225,8 @@ function toJob(row: Record<string, any>): Job {
     commentId: row.comment_id,
     commentDone: row.comment_done,
     pinDone: row.pin_done,
+    setRelated: row.set_related,
+    relatedDone: row.related_done,
     attempts: row.attempts,
     lastError: row.last_error,
     runAfter: row.run_after,
@@ -219,10 +244,12 @@ export async function createJob(input: {
   commentText: string;
   shouldPin: boolean;
   runAfter: Date;
+  setRelated?: boolean;
 }): Promise<Job | null> {
   const row = await queryOne(
-    `INSERT INTO jobs (video_key, platform, template_id, template_name, comment_text, should_pin, run_after)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO jobs (video_key, platform, template_id, template_name, comment_text, should_pin,
+                       run_after, set_related)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      ON CONFLICT (video_key) DO NOTHING
      RETURNING *`,
     [
@@ -233,6 +260,7 @@ export async function createJob(input: {
       input.commentText,
       input.shouldPin,
       input.runAfter,
+      input.setRelated ?? false,
     ],
   );
   return row ? toJob(row) : null;
@@ -270,6 +298,8 @@ export async function updateJob(
     commentId: string | null;
     commentDone: boolean;
     pinDone: boolean;
+    relatedDone: boolean;
+    setRelated: boolean;
     attempts: number;
     lastError: string | null;
     runAfter: Date;
@@ -282,6 +312,8 @@ export async function updateJob(
     commentId: 'comment_id',
     commentDone: 'comment_done',
     pinDone: 'pin_done',
+    relatedDone: 'related_done',
+    setRelated: 'set_related',
     attempts: 'attempts',
     lastError: 'last_error',
     runAfter: 'run_after',

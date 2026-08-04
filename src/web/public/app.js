@@ -78,6 +78,7 @@ function renderConsoleUrls(s) {
     ['YouTube リダイレクトURI', s.redirectUris.youtube],
     ['TikTok リダイレクトURI', s.redirectUris.tiktok],
     ['TikTok Web/Desktop URL', s.publicUrl],
+    ['AutoClipMaker の COMMENT_HOOK_URL', s.ingestUrl || ''],
   ]
     .map(copyRow)
     .join('');

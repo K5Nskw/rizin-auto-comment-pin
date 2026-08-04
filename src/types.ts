@@ -35,6 +35,14 @@ export interface Template {
 
 export type TemplateInput = Omit<Template, 'id'>;
 
+/** Where a clip came from, as reported by AutoClipMaker. */
+export interface ClipSource {
+  videoId: string;
+  url: string;
+  title: string;
+  startSec: number | null;
+}
+
 export interface VideoRecord {
   key: string;
   platform: Platform;
@@ -44,6 +52,8 @@ export interface VideoRecord {
   url: string;
   publishedAt: Date | null;
   detectedAt: Date;
+  /** Null for anything that didn't arrive through the clip hook. */
+  source: ClipSource | null;
 }
 
 export type JobStatus = 'pending' | 'commenting' | 'pinning' | 'done' | 'needs_manual' | 'failed';
@@ -60,6 +70,9 @@ export interface Job {
   commentId: string | null;
   commentDone: boolean;
   pinDone: boolean;
+  /** Whether this job should link the Short back to its source video. */
+  setRelated: boolean;
+  relatedDone: boolean;
   attempts: number;
   lastError: string | null;
   runAfter: Date;
@@ -80,4 +93,5 @@ export interface DetectedVideo {
   url: string;
   publishedAt: Date | null;
   raw?: unknown;
+  source?: ClipSource;
 }
